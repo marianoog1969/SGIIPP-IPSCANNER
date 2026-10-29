@@ -1,0 +1,1046 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
+import { listen, UnlistenFn } from "@tauri-apps/api/event";
+
+import {
+  Host,
+  Network,
+  Info,
+  InfoState,
+  fmtUptime,
+  diskPct,
+  lightClass,
+  worstDisk,
+  diskText,
+  diskAlerts,
+  pctClass,
+  ficha,
+  SortKey,
+  userOf,
+  fmtRam,
+  shortOs,
+  fmtBytes,
+  ipNum,
+  deviceKind,
+} from "./lib";
+import { DEFAULT_COLS, Row } from "./columns";
+import { saveBytes } from "./files";
+import Manual from "./Manual";
+import ReportDialog from "./ReportDialog";
+import { confirm } from "@tauri-apps/plugin-dialog";
+import DeviceIcon from "./DeviceIcon";
+import NewsDialog from "./NewsDialog";
+import LogDialog from "./LogDialog";
+import AboutDialog from "./AboutDialog";
+import { logEvent } from "./log";
+import SettingsDialog, { DEFAULT_SETTINGS, Settings } from "./SettingsDialog";
+
+function AlertIcon({ info }: { info?: Info }) {
+  if (!info) return null;
+  const a = diskAlerts(info);
+  if (!a.length) return null;
+  const tip = a
+    .map((x) => `${x.d.letter} ${x.d.label}`.trim() + `: ${x.p}% ocupado (${fmtBytes(x.d.free)} libres)`)
+    .join("\n");
+  return (
+    <span className="alert bad" title={tip}>
+      ⚠
+    </span>
+  );
+}
+
+const PREFS = "ipscanner.prefs.v1";
+interface Prefs {
+  range?: string;
+  autoCheck?: boolean;
+  onlyAlerts?: boolean;
+  kindFilter?: string;
+  hideNews?: boolean;
+  sort?: { key: SortKey; asc: boolean };
+  settings?: Settings;
+  reportCols?: string[];
+}
+const loadPrefs = (): Prefs => {
+  try {
+    return JSON.parse(localStorage.getItem(PREFS) ?? "{}");
+  } catch {
+    return {};
+  }
+};
+
+const LAST = "ipscanner.lastscan.v1";
+interface LastScan {
+  at: number;
+  ips: string[];
+}
+const loadLast = (): LastScan | null => {
+  try {
+    const v = JSON.parse(localStorage.getItem(LAST) ?? "null");
+    return v && Array.isArray(v.ips) ? v : null;
+  } catch {
+    return null;
+  }
+};
+
+export default function App() {
+  const prefs = useRef<Prefs>(loadPrefs()).current;
+  const [prevScan, setPrevScan] = useState<LastScan | null>(null);
+  const prevSet = useMemo(() => new Set(prevScan?.ips ?? []), [prevScan]);
+  const [networks, setNetworks] = useState<Network[]>([]);
+  const [range, setRange] = useState(prefs.range ?? "");
+  const [hosts, setHosts] = useState<Map<string, Host>>(new Map());
+  const hostsRef = useRef<Map<string, Host>>(new Map());
+  const [scanning, setScanning] = useState(false);
+  const [progress, setProgress] = useState({ done: 0, total: 0 });
+  const [filter, setFilter] = useState("");
+  const [sort, setSort] = useState<{ key: SortKey; asc: boolean }>(prefs.sort ?? { key: "ip", asc: true });
+  const [msg, setMsg] = useState("");
+  const [error, setError] = useState("");
+  const unlisten = useRef<UnlistenFn[]>([]);
+  const [selected, setSelected] = useState<string | null>(null);
+  const [infos, setInfos] = useState<Map<string, InfoState>>(new Map());
+  const [cred, setCred] = useState({ user: "", pass: "" });
+  const [autoCheck, setAutoCheck] = useState(prefs.autoCheck ?? true);
+  const [onlyAlerts, setOnlyAlerts] = useState(prefs.onlyAlerts ?? false);
+  const [kindFilter, setKindFilter] = useState<string>(prefs.kindFilter || "all");
+  const [settings, setSettings] = useState<Settings>({ ...DEFAULT_SETTINGS, ...prefs.settings });
+  const [reportCols, setReportCols] = useState<string[]>(prefs.reportCols ?? DEFAULT_COLS);
+  const [dialog, setDialog] = useState<null | "report" | "manual" | "news" | "log" | "about">(prefs.hideNews ? null : "news");
+  const [hideNews, setHideNews] = useState(prefs.hideNews ?? false);
+  const [showSettings, setShowSettings] = useState(false);
+  const [toast, setToast] = useState("");
+  const toastTimer = useRef<number | undefined>(undefined);
+  const [marked, setMarked] = useState<Set<string>>(new Set());
+  const lastChecked = useRef<string | null>(null);
+  const shiftHeld = useRef(false);
+  const [menu, setMenu] = useState<{ x: number; y: number; h: Host } | null>(null);
+  const filterRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(PREFS, JSON.stringify({ range, autoCheck, onlyAlerts, kindFilter, hideNews, sort, settings, reportCols }));
+    } catch {
+      /* sin almacenamiento: no pasa nada */
+    }
+  }, [range, autoCheck, onlyAlerts, kindFilter, hideNews, sort, settings, reportCols]);
+
+  const notify = (text: string) => {
+    setToast(text);
+    window.clearTimeout(toastTimer.current);
+    toastTimer.current = window.setTimeout(() => setToast(""), 1800);
+  };
+  const userOfHost = (h: Host) => userOf(infos.get(h.ip)?.info);
+  const osOf = (h: Host) => shortOs(infos.get(h.ip)?.info?.os);
+  const ramOf = (h: Host) => infos.get(h.ip)?.info?.ram_total ?? 0;
+  const worstOf = (h: Host) => {
+    const i = infos.get(h.ip)?.info;
+    return i ? worstDisk(i)?.p ?? -1 : -1;
+  };
+
+  const loadInfo = useCallback(
+    async (h: Host, useCred: boolean) => {
+      const set = (s: InfoState) => setInfos((p) => new Map(p).set(h.ip, s));
+      set({ loading: true });
+      try {
+        const withCred = useCred && cred.user.trim() !== "";
+        const info = await invoke<Info>("get_info", {
+          ip: h.ip,
+          name: h.name,
+          user: withCred ? cred.user : null,
+          password: withCred ? cred.pass : null,
+        });
+        set({ loading: false, info });
+      } catch (e) {
+        set({ loading: false, error: String(e) });
+      }
+    },
+    [cred]
+  );
+
+  // Comprobación de discos en segundo plano (equipos simultáneos según Ajustes) al terminar el escaneo
+  useEffect(() => {
+    if (scanning || !autoCheck) return;
+    const pending = [...hosts.values()].filter((h) => !infos.has(h.ip));
+    const running = [...infos.values()].filter((i) => i.loading).length;
+    pending.slice(0, Math.max(0, settings.consultas - running)).forEach((h) => loadInfo(h, false));
+  }, [scanning, autoCheck, hosts, infos, loadInfo, settings.consultas]);
+
+  const select = (h: Host) => {
+    setSelected(h.ip);
+    if (!infos.has(h.ip)) loadInfo(h, false);
+  };
+
+  // Eventos del backend
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const subs = [
+        await listen<Host>("scan-host", (e) =>
+          setHosts((prev) => new Map(prev).set(e.payload.ip, e.payload))
+        ),
+        await listen<{ done: number; total: number }>("scan-progress", (e) =>
+          setProgress(e.payload)
+        ),
+        await listen<{ found: number; cancelled: boolean }>("scan-done", (e) => {
+          setScanning(false);
+          logEvent("info", `Escaneo ${e.payload.cancelled ? "detenido" : "completado"}: ${e.payload.found} equipos`);
+          if (!e.payload.cancelled) {
+            try {
+              localStorage.setItem(LAST, JSON.stringify({ at: Date.now(), ips: [...hostsRef.current.keys()] }));
+            } catch {
+              /* sin almacenamiento */
+            }
+          }
+          setMsg(
+            e.payload.cancelled
+              ? `Escaneo detenido · ${e.payload.found} equipos`
+              : `Escaneo completado · ${e.payload.found} equipos`
+          );
+        }),
+      ];
+      if (cancelled) subs.forEach((u) => u());
+      else unlisten.current = subs;
+    })();
+    return () => {
+      cancelled = true;
+      unlisten.current.forEach((u) => u());
+    };
+  }, []);
+
+  // Redes locales detectadas
+  useEffect(() => {
+    invoke<Network[]>("get_networks")
+      .then((n) => {
+        setNetworks(n);
+        if (n.length) setRange((r) => r || n[0].cidr);
+      })
+      .catch((e) => setError(String(e)));
+  }, []);
+
+  const start = useCallback(async () => {
+    logEvent("info", `Escaneo iniciado: ${range} (${settings.hilos} hilos)`);
+    setError("");
+    setMsg("");
+    setPrevScan(loadLast());
+    setMarked(new Set());
+    setHosts(new Map());
+    setSelected(null);
+    setInfos(new Map());
+    setProgress({ done: 0, total: 0 });
+    try {
+      const total = await invoke<number>("start_scan", { range, threads: settings.hilos });
+      setProgress({ done: 0, total });
+      setScanning(true);
+    } catch (e) {
+      setError(String(e));
+    }
+  }, [range, settings.hilos]);
+
+  // Si la sesión anterior se cerró sin avisar, se abre el registro automáticamente
+  useEffect(() => {
+    invoke<{ crashed: boolean }>("log_info")
+      .then((i) => i?.crashed && setDialog("log"))
+      .catch(() => {});
+  }, []);
+
+  const stop = () => invoke("stop_scan");
+
+  hostsRef.current = hosts;
+
+  const groupOf = (h: Host): string => {
+    const k = deviceKind(h, infos.get(h.ip)?.info);
+    return k === "server" ? "pc" : k === "camera" ? "other" : k;
+  };
+  const kindCount = useMemo(() => {
+    const c: Record<string, number> = { pc: 0, printer: 0, router: 0, tv: 0, phone: 0, other: 0 };
+    hosts.forEach((h) => {
+      c[groupOf(h)]++;
+    });
+    return c;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hosts, infos]);
+
+  const rows = useMemo(() => {
+    const f = filter.trim().toLowerCase();
+    let list = [...hosts.values()];
+    if (onlyAlerts)
+      list = list.filter((h) => {
+        const i = infos.get(h.ip)?.info;
+        return i ? diskAlerts(i).length > 0 : false;
+      });
+    if (kindFilter !== "all") list = list.filter((h) => groupOf(h) === kindFilter);
+    if (f)
+      list = list.filter((h) =>
+        `${h.name} ${h.ip} ${h.mac} ${userOfHost(h)} ${infos.get(h.ip)?.info?.last_user ?? ""} ${infos.get(h.ip)?.info?.user ?? ""}`.toLowerCase().includes(f)
+      );
+    const dir = sort.asc ? 1 : -1;
+    list.sort((a, b) => {
+      switch (sort.key) {
+        case "ip":
+          return (ipNum(a.ip) - ipNum(b.ip)) * dir;
+        case "ms":
+          return ((a.ms ?? 1e9) - (b.ms ?? 1e9)) * dir;
+        case "user":
+          return (userOfHost(a) || "\uffff").localeCompare(userOfHost(b) || "\uffff") * dir;
+        case "os":
+          return (osOf(a) || "\uffff").localeCompare(osOf(b) || "\uffff") * dir;
+        case "ram":
+          return ((ramOf(a) || 1e18) - (ramOf(b) || 1e18)) * dir;
+        case "disk":
+          return ((worstOf(a) < 0 ? 1e9 : worstOf(a)) - (worstOf(b) < 0 ? 1e9 : worstOf(b))) * dir;
+        default:
+          return a[sort.key].localeCompare(b[sort.key]) * dir;
+      }
+    });
+    return list;
+  }, [hosts, filter, sort, onlyAlerts, kindFilter, infos]);
+
+  // Atajos de teclado
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement)?.tagName;
+      const typing = tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA";
+      const ctrl = e.ctrlKey || e.metaKey;
+      if (e.key === "F1") {
+        e.preventDefault();
+        setDialog("manual");
+        return;
+      }
+      if (e.key === "Escape" && marked.size > 0 && !dialog && !showSettings && !menu) {
+        setMarked(new Set());
+        return;
+      }
+      if (e.key === "Escape") {
+        if (showSettings) setShowSettings(false);
+        else if (dialog) setDialog(null);
+        else if (document.activeElement === filterRef.current && filter) setFilter("");
+        else if (menu) setMenu(null);
+        else if (selected) setSelected(null);
+        return;
+      }
+      if (dialog || showSettings) return;
+      if (ctrl && e.key.toLowerCase() === "f") {
+        e.preventDefault();
+        filterRef.current?.focus();
+        filterRef.current?.select();
+        return;
+      }
+      if (e.key === "F5" || (ctrl && e.key.toLowerCase() === "r")) {
+        e.preventDefault();
+        if (!scanning && range.trim()) start();
+        return;
+      }
+      if (typing || (e.key !== "ArrowDown" && e.key !== "ArrowUp") || !rows.length) return;
+      e.preventDefault();
+      const i = rows.findIndex((h) => h.ip === selected);
+      const n =
+        e.key === "ArrowDown" ? Math.min(rows.length - 1, i + 1) : Math.max(0, i < 0 ? 0 : i - 1);
+      select(rows[n]);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  });
+
+  useEffect(() => {
+    document.querySelector("tr.sel")?.scrollIntoView({ block: "nearest" });
+  }, [selected]);
+
+  const infoCell = (h: Host, v: string | null, label = "—") => {
+    const s = infos.get(h.ip);
+    if (!s) return autoCheck ? <span className="skel" /> : <span className="muted">—</span>;
+    if (s.loading) return <span className="skel" />;
+    if (s.error)
+      return (
+        <span className="muted" title={`No se pudo consultar: ${s.error}`}>
+          {label}
+        </span>
+      );
+    return v ?? <span className="muted">—</span>;
+  };
+
+  const diskCell = (h: Host) => {
+    const i = infos.get(h.ip)?.info;
+    const w = i ? worstDisk(i) : null;
+    if (!i || !w) return infoCell(h, i ? "Sin discos" : null);
+    const tip = i.disks
+      .filter((d) => d.total > 0)
+      .map((d) => `${`${d.letter} ${d.label}`.trim()}: ${diskPct(d)}% ocupado (${fmtBytes(d.free)} libres)`)
+      .join("\n");
+    return (
+      <span className="light" title={tip}>
+        <span className={`dot ${lightClass(w.p)}`} /> {w.p}% · {w.d.letter}
+      </span>
+    );
+  };
+
+  const toggleSort = (key: SortKey) =>
+    setSort((s) => (s.key === key ? { key, asc: !s.asc } : { key, asc: true }));
+
+  const arrow = (k: SortKey) => (sort.key === k ? (sort.asc ? " ▲" : " ▼") : "");
+
+  const [remote, setRemote] = useState<{ rdp: boolean; dameware: string | null }>({ rdp: false, dameware: null });
+  useEffect(() => {
+    invoke<{ rdp: boolean; dameware: string | null }>("remote_tools", { damewarePath: settings.dameware })
+      .then((r) => r && setRemote(r))
+      .catch(() => {});
+  }, [settings.dameware]);
+
+  type RemoteKind = "rdp" | "dameware" | "web" | "share" | "ping" | "shutdown" | "reboot" | "abort";
+  const REMOTE_MSG: Record<RemoteKind, string> = {
+    rdp: "Escritorio remoto: conectando a",
+    dameware: "DameWare: conectando a",
+    web: "Abriendo en el navegador",
+    share: "Abriendo recurso compartido de",
+    ping: "Ping continuo a",
+    shutdown: "Apagado en 30 s:",
+    reboot: "Reinicio en 30 s:",
+    abort: "Apagado cancelado:",
+  };
+  const openRemote = async (kind: RemoteKind, h: Host) => {
+    const label = h.name ? `${h.name} (${h.ip})` : h.ip;
+    if (kind === "shutdown" || kind === "reboot") {
+      const ok = await confirm(
+        `¿${kind === "shutdown" ? "Apagar" : "Reiniciar"} el equipo ${label}?\n\nSe ejecutará en 30 segundos con tu usuario de Windows (necesita permisos de administrador en ese equipo). Podrás cancelarlo desde el menú.`,
+        { title: kind === "shutdown" ? "Apagar equipo" : "Reiniciar equipo", kind: "warning", okLabel: kind === "shutdown" ? "Apagar" : "Reiniciar", cancelLabel: "Cancelar" }
+      );
+      if (!ok) return;
+    }
+    try {
+      await invoke("open_remote", {
+        kind,
+        ip: h.ip,
+        damewarePath: settings.dameware,
+        damewareAuth: settings.damewareAuth,
+        damewareArgs: settings.damewareArgs,
+        user: cred.user || null,
+        password: cred.user ? cred.pass : null,
+      });
+      notify(`${REMOTE_MSG[kind]} ${label}`);
+    } catch (e) {
+      logEvent("warn", `Acción remota ${kind} sobre ${h.ip}: ${e}`);
+      setError(String(e));
+    }
+  };
+
+  const ownIps = useMemo(() => new Set(networks.map((n) => n.ip)), [networks]);
+  const toggleCheck = (ip: string, on?: boolean) =>
+    setMarked((p) => {
+      const n = new Set(p);
+      (on ?? !n.has(ip)) ? n.add(ip) : n.delete(ip);
+      return n;
+    });
+  const checkRange = (to: string) => {
+    const ips = rows.map((h) => h.ip);
+    const a = ips.indexOf(lastChecked.current ?? to);
+    const b = ips.indexOf(to);
+    if (a < 0 || b < 0) return toggleCheck(to, true);
+    setMarked((p) => {
+      const n = new Set(p);
+      ips.slice(Math.min(a, b), Math.max(a, b) + 1).forEach((ip) => n.add(ip));
+      return n;
+    });
+  };
+
+  const bulkPower = async (kind: "shutdown" | "reboot" | "abort") => {
+    const all = [...hosts.values()].filter((h) => marked.has(h.ip));
+    const targets = all.filter((h) => !ownIps.has(h.ip));
+    const skipped = all.length - targets.length;
+    if (!targets.length) return setError("No hay equipos válidos: este propio equipo no se apaga ni reinicia desde aquí.");
+    const verb = kind === "shutdown" ? "Apagar" : kind === "reboot" ? "Reiniciar" : "Cancelar el apagado/reinicio de";
+    if (kind !== "abort") {
+      const names = targets.slice(0, 12).map((h) => `• ${h.name || h.ip} (${h.ip})`).join("\n");
+      const more = targets.length > 12 ? `\n… y ${targets.length - 12} más` : "";
+      const ok = await confirm(
+        `¿${verb} ${targets.length} equipo${targets.length > 1 ? "s" : ""}?\n\n${names}${more}\n\nSe ejecutará en 30 segundos con tu usuario de Windows y podrás cancelarlo desde esta barra.${skipped ? "\n\n(Este propio equipo se ha excluido.)" : ""}`,
+        { title: `${verb} ${targets.length} equipos`, kind: "warning", okLabel: verb, cancelLabel: "Cancelar" }
+      );
+      if (!ok) return;
+    }
+    logEvent("info", `${kind} masivo sobre ${targets.length} equipos: ${targets.map((h) => h.ip).join(", ")}`);
+    const res = await Promise.allSettled(
+      targets.map((h) =>
+        invoke("open_remote", { kind, ip: h.ip, damewarePath: "", damewareAuth: "", damewareArgs: "", user: null, password: null })
+      )
+    );
+    const fails = res
+      .map((r, i) => (r.status === "rejected" ? `${targets[i].name || targets[i].ip}: ${r.reason}` : null))
+      .filter(Boolean) as string[];
+    fails.forEach((f) => logEvent("warn", `${kind} masivo: ${f}`));
+    const okN = targets.length - fails.length;
+    notify(`${REMOTE_MSG[kind]} ${okN} equipo${okN === 1 ? "" : "s"}${fails.length ? ` · ${fails.length} con error` : ""}`);
+    if (fails.length) setError(`${fails.length} equipo(s) con error:\n${fails.slice(0, 5).join("\n")}${fails.length > 5 ? "\n…" : ""}`);
+  };
+
+  const copy = async (text: string, what: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      notify(`${what} copiado`);
+    } catch {
+      setError("No se pudo copiar al portapapeles");
+    }
+  };
+
+  const toTable = (sep: string) =>
+    [
+      ["Nombre", "IP", "MAC", "Sistema", "RAM", "Almacenamiento"].join(sep),
+      ...rows.map((h) =>
+        [h.name, h.ip, h.mac, osOf(h), ramOf(h) ? fmtRam(ramOf(h)) : "", diskText(infos.get(h.ip)?.info)].join(sep)
+      ),
+    ].join("\n");
+
+  const exportCsv = () => {
+    const esc = (s: string) => `"${s.replace(/"/g, '""')}"`;
+    const csv =
+      "﻿" +
+      [
+        "Nombre;IP;MAC;Sistema;RAM;Almacenamiento",
+        ...rows.map((h) =>
+          [h.name, h.ip, h.mac, osOf(h), ramOf(h) ? fmtRam(ramOf(h)) : "", diskText(infos.get(h.ip)?.info)]
+            .map(esc)
+            .join(";")
+        ),
+      ].join("\r\n");
+    saveBytes(
+      `escaneo_red_${new Date().toISOString().slice(0, 10)}.csv`,
+      "CSV (Excel)",
+      "csv",
+      new TextEncoder().encode(csv)
+    )
+      .then((path) => path && notify("CSV guardado"))
+      .catch((e) => setError(String(e)));
+  };
+
+  const sel = selected ? hosts.get(selected) : undefined;
+  const ds = sel ? infos.get(sel.ip) : undefined;
+  const info = ds?.info;
+  const row = (k: string, v: string | null | undefined) =>
+    v ? (
+      <>
+        <dt>{k}</dt>
+        <dd onDoubleClick={() => copy(v, k)}>{v}</dd>
+      </>
+    ) : null;
+  const meter = (label: string, p: number, detail: string) => (
+    <div className="disk">
+      <div className="disk-top">
+        <span>{label}</span>
+        <b>{p}%</b>
+      </div>
+      <div className="meter">
+        <div className={pctClass(p)} style={{ width: `${p}%` }} />
+      </div>
+      <div className="muted small">{detail}</div>
+    </div>
+  );
+
+  const alive = [...hosts.values()];
+  const newCount = prevScan ? alive.filter((h) => !prevSet.has(h.ip)).length : 0;
+  const gone = prevScan && !scanning ? prevScan.ips.filter((ip) => !hosts.has(ip)) : [];
+  const checked = alive.filter((h) => infos.get(h.ip) && !infos.get(h.ip)!.loading).length;
+  const alertCount = [...hosts.values()].filter((h) => {
+    const i = infos.get(h.ip)?.info;
+    return i && diskAlerts(i).length > 0;
+  }).length;
+
+  const toRow = (h: Host): Row => ({ h, info: infos.get(h.ip)?.info });
+  const visibleRows: Row[] = rows.map(toRow);
+  const allRows: Row[] = [...hosts.values()].sort((a, b) => ipNum(a.ip) - ipNum(b.ip)).map(toRow);
+
+  const pct = progress.total ? Math.round((progress.done / progress.total) * 100) : 0;
+
+  return (
+    <div className="app">
+      <header className="toolbar">
+        <div className="brand clickable" onClick={() => setDialog("about")} title="Acerca de SGIIPP-IPSCANER">
+          <b>SGIIPP-IPSCANER</b>
+          <span title={settings.localidad ? `${settings.centro} · ${settings.localidad}` : settings.centro}>
+            {settings.centro}
+          </span>
+        </div>
+        <div className="range">
+          <label>Rango</label>
+          <input
+            value={range}
+            onChange={(e) => setRange(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && !scanning && start()}
+            placeholder="192.168.1.0/24 · 192.168.1.1-254"
+            spellCheck={false}
+            disabled={scanning}
+          />
+          {networks.length > 0 && (
+            <select
+              value=""
+              onChange={(e) => e.target.value && setRange(e.target.value)}
+              disabled={scanning}
+              title="Redes detectadas en este equipo"
+            >
+              <option value="">Mis redes…</option>
+              {networks.map((n) => (
+                <option key={n.name + n.ip} value={n.cidr}>
+                  {n.cidr} ({n.ip})
+                </option>
+              ))}
+            </select>
+          )}
+        </div>
+        {scanning ? (
+          <button className="btn danger" onClick={stop}>■ Detener · {pct}%</button>
+        ) : (
+          <button className="btn primary" onClick={start} disabled={!range.trim()}>▶ Escanear</button>
+        )}
+        <div className="tools">
+          <button className="btn icon" onClick={() => setShowSettings(true)} title="Ajustes (nombre del centro)">⚙</button>
+          <button className="btn icon" onClick={() => setDialog("manual")} title="Manual de usuario (F1)">?</button>
+        </div>
+      </header>
+
+      {error && (
+        <div className="banner" role="alert">
+          <span>{error}</span>
+          <button onClick={() => setError("")} title="Cerrar">✕</button>
+        </div>
+      )}
+
+      <div className="subbar">
+        <input
+          ref={filterRef}
+          className="filter"
+          value={filter}
+          onChange={(e) => setFilter(e.target.value)}
+          placeholder="Filtrar por nombre, IP, MAC o usuario…"
+        />
+        <div className="seg" role="group" aria-label="Filtrar por tipo">
+          {([
+            ["all", "Todos", hosts.size],
+            ["pc", "Ordenadores", kindCount.pc],
+            ["printer", "Impresoras", kindCount.printer],
+            ["router", "Routers y red", kindCount.router],
+            ["tv", "TV y multimedia", kindCount.tv],
+            ["phone", "Móviles y teléfonos", kindCount.phone],
+            ["other", "Otros", kindCount.other],
+          ] as const).map(([k, label, n]) => (
+            <button
+              key={k}
+              className={kindFilter === k ? "on" : ""}
+              onClick={() => setKindFilter(k)}
+              title={`${label} (${n})`}
+            >
+              {k !== "all" && <DeviceIcon kind={k} />}
+              {k === "all" ? "Todos" : ""} <span className="n">{n}</span>
+            </button>
+          ))}
+        </div>
+        <label className="chk" title="Consulta los discos de los equipos al terminar el escaneo">
+          <input type="checkbox" checked={autoCheck} onChange={(e) => setAutoCheck(e.target.checked)} />
+          Comprobar discos
+        </label>
+        <label className="chk">
+          <input type="checkbox" checked={onlyAlerts} onChange={(e) => setOnlyAlerts(e.target.checked)} />
+          Solo con alertas
+        </label>
+        <div className="spacer" />
+        <button
+          className="btn"
+          disabled={!alive.length || scanning}
+          onClick={() => {
+            logEvent("info", `Recomprobar pulsado (${alive.length} equipos, ${settings.consultas} consultas simultáneas)`);
+            setInfos(new Map());
+            setAutoCheck(true);
+          }}
+          title="Volver a consultar discos, RAM y sistema de todos los equipos"
+        >
+          ↻ Recomprobar
+        </button>
+        <button className="btn" disabled={!rows.length} onClick={() => copy(toTable("\t"), "Listado")}>
+          Copiar
+        </button>
+        <button className="btn" disabled={!rows.length} onClick={exportCsv}>
+          Exportar CSV
+        </button>
+        <button className="btn primary" disabled={!hosts.size} onClick={() => setDialog("report")}>
+          Informe PDF
+        </button>
+      </div>
+
+      {scanning && (
+        <div className="bar"><div style={{ width: `${pct}%` }} /></div>
+      )}
+
+      {marked.size > 0 && (
+        <div className="selbar" role="toolbar" aria-label="Acciones sobre los equipos seleccionados">
+          <b>{marked.size} seleccionado{marked.size > 1 ? "s" : ""}</b>
+          <button className="btn" disabled={!remote.rdp} onClick={() => bulkPower("reboot")} title="Reiniciar en 30 s">Reiniciar</button>
+          <button className="btn danger" disabled={!remote.rdp} onClick={() => bulkPower("shutdown")} title="Apagar en 30 s">Apagar</button>
+          <button className="btn" disabled={!remote.rdp} onClick={() => bulkPower("abort")} title="Cancelar apagado o reinicio pendiente">Cancelar apagado</button>
+          <button
+            className="btn"
+            onClick={() =>
+              copy(
+                [...hosts.values()].filter((h) => marked.has(h.ip)).map((h) => h.ip).join("\n"),
+                "IPs"
+              )
+            }
+          >
+            Copiar IPs
+          </button>
+          <div className="spacer" />
+          <button className="btn" onClick={() => setMarked(new Set())} title="Quitar la selección (Esc)">Limpiar selección</button>
+        </div>
+      )}
+      <div className="content">
+      <main className="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th className="c-chk">
+                <input
+                  type="checkbox"
+                  aria-label="Seleccionar todos los equipos visibles"
+                  title="Seleccionar todos los equipos visibles"
+                  checked={rows.length > 0 && rows.every((h) => marked.has(h.ip))}
+                  onChange={(e) =>
+                    setMarked((p) => {
+                      const n = new Set(p);
+                      rows.forEach((h) => (e.target.checked ? n.add(h.ip) : n.delete(h.ip)));
+                      return n;
+                    })
+                  }
+                />
+              </th>
+              <th className="c-state" />
+              <th onClick={() => toggleSort("name")}>Nombre del equipo{arrow("name")}</th>
+              <th onClick={() => toggleSort("ip")}>Dirección IP{arrow("ip")}</th>
+              <th onClick={() => toggleSort("mac")}>Dirección MAC{arrow("mac")}</th>
+              <th onClick={() => toggleSort("user")}>Último usuario{arrow("user")}</th>
+              <th onClick={() => toggleSort("os")}>Sistema operativo{arrow("os")}</th>
+              <th className="num" onClick={() => toggleSort("ram")}>RAM{arrow("ram")}</th>
+              <th onClick={() => toggleSort("disk")}>Almacenamiento{arrow("disk")}</th>
+              <th className="num" onClick={() => toggleSort("ms")}>Latencia{arrow("ms")}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((h) => (
+              <tr
+                key={h.ip}
+                className={`${selected === h.ip ? "sel" : ""} ${marked.has(h.ip) ? "picked" : ""}`}
+                tabIndex={0}
+                onClick={(e) => {
+                  if (e.ctrlKey || e.metaKey) {
+                    toggleCheck(h.ip);
+                    lastChecked.current = h.ip;
+                  } else if (e.shiftKey) {
+                    checkRange(h.ip);
+                  } else select(h);
+                }}
+                onKeyDown={(e) => e.key === "Enter" && select(h)}
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  setMenu({ x: e.clientX, y: e.clientY, h });
+                }}
+              >
+                <td className="c-chk" onClick={(e) => e.stopPropagation()}>
+                  <input
+                    type="checkbox"
+                    aria-label={`Seleccionar ${h.name || h.ip}`}
+                    checked={marked.has(h.ip)}
+                    onClick={(e) => {
+                      shiftHeld.current = e.shiftKey;
+                    }}
+                    onChange={() => {
+                      if (shiftHeld.current) checkRange(h.ip);
+                      else toggleCheck(h.ip);
+                      lastChecked.current = h.ip;
+                    }}
+                  />
+                </td>
+                <td className="c-state">
+                  <span
+                    className={`dot ${h.alive ? "on" : "arp"}`}
+                    title={h.alive ? "Responde a ping" : "Solo en tabla ARP (no responde a ping)"}
+                  />
+                </td>
+                <td onDoubleClick={() => h.name && copy(h.name, "Nombre")}>
+                  <DeviceIcon kind={deviceKind(h, infos.get(h.ip)?.info)} />
+                  {h.name || <span className="muted">—</span>}
+                  {prevScan && !prevSet.has(h.ip) && (
+                    <span className="badge-nuevo" title="No estaba en el escaneo anterior">Nuevo</span>
+                  )}
+                  <AlertIcon info={infos.get(h.ip)?.info} />
+                </td>
+                <td className="mono" onDoubleClick={() => copy(h.ip, "IP")}>{h.ip}</td>
+                <td className="mono" onDoubleClick={() => h.mac && copy(h.mac, "MAC")}>
+                  {h.mac || <span className="muted">—</span>}
+                </td>
+                <td className="user" title={userOfHost(h)}>{infoCell(h, userOfHost(h) || null)}</td>
+                <td className="os" title={osOf(h)}>{infoCell(h, osOf(h) || null, "Sin acceso")}</td>
+                <td className="num">
+                  {infoCell(h, ramOf(h) ? fmtRam(ramOf(h)) : null)}
+                </td>
+                <td>{diskCell(h)}</td>
+                <td className="num">{h.ms != null ? `${h.ms} ms` : <span className="muted">—</span>}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {!rows.length && (
+          <div className="empty">
+            {scanning ? (
+              <>
+                <span className="spinner" /> Buscando equipos…
+              </>
+            ) : hosts.size ? (
+              <>
+                Ningún equipo coincide con el filtro.{" "}
+                <button
+                  className="btn"
+                  onClick={() => {
+                    setFilter("");
+                    setOnlyAlerts(false);
+                    setKindFilter("all");
+                  }}
+                >
+                  Quitar filtros
+                </button>
+              </>
+            ) : (
+              "Pulsa «Escanear» (o F5) para descubrir los equipos de la red."
+            )}
+          </div>
+        )}
+      </main>
+
+      {sel && (
+        <aside className="detail">
+          <div className="d-head">
+            <div>
+              <h2>{sel.name || sel.ip}</h2>
+              <span className="muted mono">{sel.ip}</span>
+            </div>
+            <button className="btn" onClick={() => setSelected(null)} title="Cerrar">✕</button>
+          </div>
+          <dl>
+            <dt>MAC</dt>
+            <dd className="mono">{sel.mac || "—"}</dd>
+            <dt>Latencia</dt>
+            <dd>{sel.ms != null ? `${sel.ms} ms` : "—"}</dd>
+            <dt>Estado</dt>
+            <dd>{sel.alive ? "Responde a ping" : "Solo en tabla ARP"}</dd>
+          </dl>
+
+          <div className="d-sec">
+            <h3>Equipo</h3>
+            <div className="d-actions">
+              <button className="btn" disabled={!info} onClick={() => info && copy(ficha(sel, info), "Ficha")} title="Copiar ficha del equipo">⧉</button>
+              <button className="btn" disabled={ds?.loading} onClick={() => loadInfo(sel, false)} title="Volver a consultar">↻</button>
+              <button className="btn" disabled={!remote.rdp} onClick={() => openRemote("rdp", sel)} title="Escritorio remoto (RDP)">RDP</button>
+              <button className="btn" disabled={!remote.dameware} onClick={() => openRemote("dameware", sel)} title={remote.dameware ? "DameWare" : "DameWare no está instalado"}>DameWare</button>
+            </div>
+          </div>
+          {ds?.loading && <p className="muted">Consultando…</p>}
+          {ds?.error && <p className="err">{ds.error}</p>}
+          {info && (
+            <>
+              <dl>
+                {row("Sistema", info.os && `${info.os}${info.arch ? ` (${info.arch})` : ""}`)}
+                {row("Versión", info.version && `${info.version}${info.build ? ` · build ${info.build}` : ""}`)}
+                {row("Modelo", [info.manufacturer, info.model].filter(Boolean).join(" "))}
+                {row("Nº serie", info.serial)}
+                {row("CPU", info.cpu && `${info.cpu}${info.cores ? ` · ${info.cores} núcleos / ${info.threads ?? "?"} hilos` : ""}`)}
+                {row("Último usuario", userOf(info))}
+                {row("Dominio", info.domain)}
+                {row("Encendido", info.uptime_s != null ? `hace ${fmtUptime(info.uptime_s)}` : null)}
+              </dl>
+
+              {info.ram_total
+                ? meter(
+                    "Memoria RAM",
+                    Math.round(((info.ram_total - (info.ram_free ?? 0)) / info.ram_total) * 100),
+                    `${fmtBytes(info.ram_free ?? 0)} libres de ${fmtBytes(info.ram_total)}`
+                  )
+                : null}
+              {info.cpu_load != null && meter("Uso de CPU", Math.round(info.cpu_load), "Carga en este momento")}
+
+              <div className="d-sec">
+                <h3>Discos duros</h3>
+              </div>
+              {info.disks.length === 0 && <p className="muted">Sin discos fijos.</p>}
+              {info.disks.map((d) => {
+                const p = d.total ? Math.round(((d.total - d.free) / d.total) * 100) : 0;
+                return (
+                  <div key={d.letter}>
+                    {meter(`${d.letter} ${d.label}`.trim(), p, `${fmtBytes(d.free)} libres de ${fmtBytes(d.total)}`)}
+                  </div>
+                );
+              })}
+            </>
+          )}
+
+          <details className="cred">
+            <summary>Usar otras credenciales</summary>
+            <p className="muted small">Por defecto se usa tu usuario de Windows (necesita ser administrador del equipo).</p>
+            <input placeholder="DOMINIO\usuario" value={cred.user} onChange={(e) => setCred({ ...cred, user: e.target.value })} />
+            <input type="password" placeholder="Contraseña" value={cred.pass} onChange={(e) => setCred({ ...cred, pass: e.target.value })} />
+            <button className="btn" disabled={!cred.user.trim() || ds?.loading} onClick={() => loadInfo(sel, true)}>
+              Consultar con estas credenciales
+            </button>
+          </details>
+        </aside>
+      )}
+      </div>
+
+      {menu && (
+        <>
+          <div
+            className="backdrop"
+            onClick={() => setMenu(null)}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              setMenu(null);
+            }}
+          />
+          <ul
+            className="menu"
+            style={{
+              left: Math.max(4, Math.min(menu.x, window.innerWidth - 210)),
+              top: Math.max(4, Math.min(menu.y, window.innerHeight - 420)),
+            }}
+          >
+            {[
+              ["Copiar IP", menu.h.ip, "IP"],
+              ["Copiar nombre", menu.h.name, "Nombre"],
+              ["Copiar MAC", menu.h.mac, "MAC"],
+              [
+                "Copiar fila",
+                [menu.h.name, menu.h.ip, menu.h.mac, osOf(menu.h), ramOf(menu.h) ? fmtRam(ramOf(menu.h)) : "", diskText(infos.get(menu.h.ip)?.info)].join("\t"),
+                "Fila",
+              ],
+            ].map(([label, text, what]) => (
+              <li
+                key={label}
+                className={text ? "" : "off"}
+                onClick={() => {
+                  setMenu(null);
+                  if (text) copy(text, what);
+                }}
+              >
+                {label}
+              </li>
+            ))}
+            <li className="sep" />
+            <li className="sep" />
+            {(
+              [
+                ["rdp", "Escritorio remoto (RDP)", !!remote.rdp],
+                ["dameware", "DameWare", !!remote.dameware],
+                ["web", "Abrir en el navegador", !!remote.rdp],
+                ["share", "Abrir recurso compartido (C$)", !!remote.rdp],
+                ["ping", "Ping continuo", !!remote.rdp],
+              ] as [RemoteKind, string, boolean][]
+            ).map(([k, label, on]) => (
+              <li
+                key={k}
+                className={on ? "" : "off"}
+                title={on ? "" : k === "dameware" ? "DameWare no está instalado (o indica su ruta en Ajustes)" : "Solo disponible en Windows"}
+                onClick={() => {
+                  const h = menu.h;
+                  setMenu(null);
+                  if (on) openRemote(k, h);
+                }}
+              >
+                {label}
+              </li>
+            ))}
+            <li className="sep" />
+            {(
+              [
+                ["reboot", "Reiniciar equipo…"],
+                ["shutdown", "Apagar equipo…"],
+                ["abort", "Cancelar apagado/reinicio"],
+              ] as [RemoteKind, string][]
+            ).map(([k, label]) => (
+              <li
+                key={k}
+                className={remote.rdp ? "" : "off"}
+                onClick={() => {
+                  const h = menu.h;
+                  setMenu(null);
+                  if (remote.rdp) openRemote(k, h);
+                }}
+              >
+                {label}
+              </li>
+            ))}
+            <li className="sep" />
+            <li
+              onClick={() => {
+                const h = menu.h;
+                setMenu(null);
+                setSelected(h.ip);
+                loadInfo(h, false);
+              }}
+            >
+              Ver ficha / actualizar
+            </li>
+          </ul>
+        </>
+      )}
+
+      {dialog === "report" && (
+        <ReportDialog
+          settings={settings}
+          visible={visibleRows}
+          all={allRows}
+          initialCols={reportCols}
+          onColsChange={setReportCols}
+          onOpenSettings={() => setShowSettings(true)}
+          onSaved={() => notify("Informe PDF guardado")}
+          onClose={() => setDialog(null)}
+        />
+      )}
+      {dialog === "news" && (
+        <NewsDialog hideOnStart={hideNews} onHideChange={setHideNews} onClose={() => setDialog(null)} />
+      )}
+      {dialog === "about" && <AboutDialog onClose={() => setDialog(null)} onManual={() => setDialog("manual")} />}
+      {dialog === "log" && <LogDialog onClose={() => setDialog(null)} notify={notify} />}
+      {dialog === "manual" && <Manual onClose={() => setDialog(null)} />}
+      {showSettings && (
+        <SettingsDialog
+          value={settings}
+          onSave={(s) => {
+            setSettings(s);
+            notify("Ajustes guardados");
+          }}
+          onOpenLog={() => {
+            setShowSettings(false);
+            setDialog("log");
+          }}
+          onClose={() => setShowSettings(false)}
+        />
+      )}
+
+      {toast && <div className="toast" role="status">{toast}</div>}
+
+      <footer className="status">
+        <span>{hosts.size} equipos{rows.length !== hosts.size && ` (${rows.length} mostrados)`}</span>
+        {scanning && <span>{progress.done}/{progress.total} · {pct}%</span>}
+        {!scanning && autoCheck && alive.length > 0 && checked < alive.length && (
+          <span title="Consultando cada equipo: sistema operativo, RAM, discos y último usuario">Leyendo SO, RAM, discos y usuario: {checked} de {alive.length}…</span>
+        )}
+        {prevScan && newCount > 0 && (
+          <span className="info" title={`Respecto al escaneo del ${new Date(prevScan.at).toLocaleString("es-ES")}`}>
+            ★ {newCount} nuevo{newCount > 1 ? "s" : ""}
+          </span>
+        )}
+        {prevScan && !scanning && gone.length > 0 && (
+          <span className="muted" title={`No aparecen ahora:\n${gone.join("\n")}`}>
+            {gone.length} ya no aparece{gone.length > 1 ? "n" : ""}
+          </span>
+        )}
+        {alertCount > 0 && <span className="err">⚠ {alertCount} con discos casi llenos</span>}
+        <span className="muted push">{msg || "Clic derecho: más acciones · ↑↓ navegar · Ctrl+F filtrar · F5 escanear · Esc cerrar"}</span>
+        <button className="linkbtn" title="Ver el registro de errores" onClick={() => setDialog("log")}>Registro</button>
+        <button className="linkbtn" title="Ver novedades" onClick={() => setDialog("news")}>v{__APP_VERSION__}</button>
+      </footer>
+    </div>
+  );
+}
