@@ -1,6 +1,7 @@
 import { jsPDF } from "jspdf";
 import { __createTable, __drawTable, type UserOptions } from "jspdf-autotable";
-import { Col, Row } from "./columns";
+import { Col, Row, colLabel } from "./columns";
+import { t, tn, locale } from "./i18n";
 import { ALERT_PCT, WARN_PCT, diskAlerts, diskPct, fmtBytes, lightClass, worstDisk } from "./lib";
 
 type RGB = [number, number, number];
@@ -55,10 +56,10 @@ const lightColor = (p: number): RGB => {
   return k === "bad" ? ROJO : k === "warn" ? AMBAR : VERDE;
 };
 
-const fecha = (d: Date) => d.toLocaleDateString("es-ES", { day: "numeric", month: "long", year: "numeric" });
-const fechaCorta = (d: Date) => d.toLocaleDateString("es-ES");
+const fecha = (d: Date) => d.toLocaleDateString(locale(), { day: "numeric", month: "long", year: "numeric" });
+const fechaCorta = (d: Date) => d.toLocaleDateString(locale());
 const fechaHora = (d: Date) =>
-  `${fechaCorta(d)} ${d.toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" })}`;
+  `${fechaCorta(d)} ${d.toLocaleTimeString(locale(), { hour: "2-digit", minute: "2-digit" })}`;
 
 interface Section {
   num: number;
@@ -73,9 +74,9 @@ export function generateReport(o: ReportOptions): Uint8Array {
   const W = doc.internal.pageSize.getWidth();
   const H = doc.internal.pageSize.getHeight();
   const k = H / 842; // escala vertical de la portada (apaisado)
-  const centro = o.centro.trim() || "Centro";
+  const centro = o.centro.trim() || t("Centro");
   const localidad = o.localidad.trim();
-  const titulo = o.titulo.trim() || "Informe de red";
+  const titulo = o.titulo.trim() || t("Informe de red");
 
   // ───────── 1. Portada ─────────
   fill(doc, AZUL_FONDO);
@@ -94,7 +95,7 @@ export function generateReport(o: ReportOptions): Uint8Array {
 
   text(doc, GRIS_CLARO);
   doc.setFont("helvetica", "normal").setFontSize(13);
-  doc.text("CENTRO", 50, 410 * k);
+  doc.text(t("CENTRO"), 50, 410 * k);
 
   text(doc, BLANCO);
   doc.setFont("helvetica", "bold").setFontSize(15);
@@ -111,7 +112,7 @@ export function generateReport(o: ReportOptions): Uint8Array {
   }
   text(doc, GRIS_CLARO);
   doc.setFont("helvetica", "italic").setFontSize(9);
-  doc.text(`Datos a ${fecha(now)}`, 50, y + 8);
+  doc.text(t("Datos a {d}", { d: fecha(now) }), 50, y + 8);
 
   if (o.organismo.trim()) {
     text(doc, GRIS_CLARO);
@@ -126,21 +127,21 @@ export function generateReport(o: ReportOptions): Uint8Array {
   const sections: Section[] = [];
   const pageShown = () => doc.getNumberOfPages() - 1; // la portada no se numera
 
-  const sectionHeader = (num: number, t: string, sub: string) => {
+  const sectionHeader = (num: number, ttl: string, sub: string) => {
     const x = ML + 12;
     const yy = MT + 14;
     text(doc, AZUL_CLARO);
     doc.setFont("helvetica", "normal").setFontSize(8);
-    doc.text(spaced(`Apartado ${String(num).padStart(2, "0")}`), x, yy);
+    doc.text(spaced(`${t("Apartado")} ${String(num).padStart(2, "0")}`), x, yy);
     text(doc, [26, 26, 26]);
     doc.setFont("helvetica", "bold").setFontSize(26);
-    doc.text(t, x, yy + 32);
+    doc.text(ttl, x, yy + 32);
     fill(doc, NARANJA);
     doc.rect(ML, yy + 8, 4, 30, "F");
     text(doc, GRIS_CLARO);
     doc.setFont("helvetica", "normal").setFontSize(10);
     doc.text(sub, x, yy + 50);
-    sections.push({ num, titulo: t, sub, page: pageShown() });
+    sections.push({ num, titulo: ttl, sub, page: pageShown() });
     return yy + 70;
   };
 
@@ -166,17 +167,17 @@ export function generateReport(o: ReportOptions): Uint8Array {
   // — Apartado: listado de equipos —
   doc.addPage();
   {
-    const colsTxt = `${o.cols.length} ${o.cols.length === 1 ? "columna" : "columnas"}`;
+    const colsTxt = tn(o.cols.length, "{n} columna", "{n} columnas");
     const startY = sectionHeader(
       num++,
-      "Listado de equipos",
-      `${o.rows.length} ${o.rows.length === 1 ? "equipo" : "equipos"} · ${colsTxt} · ${o.alcance}`
+      t("Listado de equipos"),
+      `${tn(o.rows.length, "{n} equipo", "{n} equipos")} · ${colsTxt} · ${o.alcance}`
     );
     const keyAt = (i: number) => o.cols[i]?.key;
     const rowData = o.rows;
     const opts = baseTable({
       startY,
-      head: [o.cols.map((c) => c.label.toUpperCase())],
+      head: [o.cols.map((c) => colLabel(c).toUpperCase())],
       body: rowData.map((r) => o.cols.map((c) => c.get(r))),
       columnStyles: Object.fromEntries(
         o.cols.map((c, i) => [i, c.align === "right" ? { halign: "right" as const } : {}])
@@ -224,14 +225,14 @@ export function generateReport(o: ReportOptions): Uint8Array {
         fy = MT + 10;
       }
       const items: [RGB, string][] = [
-        [VERDE, `menos del ${WARN_PCT} %`],
+        [VERDE, t("menos del {n} %", { n: WARN_PCT })],
         [AMBAR, `${WARN_PCT} - ${ALERT_PCT - 1} %`],
-        [ROJO, `${ALERT_PCT} % o más`],
+        [ROJO, t("{n} % o más", { n: ALERT_PCT })],
       ];
       doc.setFont("helvetica", "normal").setFontSize(8);
       text(doc, GRIS_CLARO);
-      doc.text("Semáforo de almacenamiento (ocupación del disco más lleno):", ML, fy);
-      let lx = ML + 232;
+      doc.text(t("Semáforo de almacenamiento (ocupación del disco más lleno):"), ML, fy);
+      let lx = ML + doc.getTextWidth(t("Semáforo de almacenamiento (ocupación del disco más lleno):")) + 14;
       items.forEach(([c, label]) => {
         fill(doc, c);
         doc.circle(lx, fy - 2.5, 3.2, "F");
@@ -253,12 +254,12 @@ export function generateReport(o: ReportOptions): Uint8Array {
     doc.addPage();
     const startY = sectionHeader(
       num++,
-      "Discos con alerta",
-      `${discos.length} ${discos.length === 1 ? "unidad" : "unidades"} con ${ALERT_PCT} % o más de ocupación`
+      t("Discos con alerta"),
+      t("{u} con {n} % o más de ocupación", { u: tn(discos.length, "{n} unidad", "{n} unidades"), n: ALERT_PCT })
     );
     const opts = baseTable({
       startY,
-      head: [["EQUIPO", "IP", "UNIDAD", "ETIQUETA", "CAPACIDAD", "LIBRE", "OCUPACIÓN"]],
+      head: [[t("EQUIPO"), "IP", t("UNIDAD"), t("ETIQUETA"), t("CAPACIDAD"), t("LIBRE"), t("OCUPACIÓN")]],
       body: discos.map(({ r, d, p }) => [
         r.h.name || "-",
         r.h.ip,
@@ -291,7 +292,7 @@ export function generateReport(o: ReportOptions): Uint8Array {
   // — Apartado: observaciones —
   if (o.observaciones.trim()) {
     doc.addPage();
-    const startY = sectionHeader(num++, "Observaciones", "Notas del responsable del informe");
+    const startY = sectionHeader(num++, t("Observaciones"), t("Notas del responsable del informe"));
     text(doc, GRIS_TEXTO);
     doc.setFont("helvetica", "normal").setFontSize(10);
     const lines = doc.splitTextToSize(o.observaciones.trim(), W - ML - MR - 12) as string[];
@@ -316,17 +317,17 @@ export function generateReport(o: ReportOptions): Uint8Array {
     doc.roundedRect(ML, top, bw, bh, 6, 6, "F");
     text(doc, AZUL_CLARO);
     doc.setFont("helvetica", "bold").setFontSize(7);
-    doc.text(spaced(`Síntesis ejecutiva · Datos a ${fechaCorta(now)}`), ML + 16, top + 22);
+    doc.text(spaced(`${t("Síntesis ejecutiva")} · ${t("Datos a {d}", { d: fechaCorta(now) })}`), ML + 16, top + 22);
 
     const total = o.rows.length;
     const activos = o.rows.filter((r) => r.h.alive).length;
     const consultados = o.rows.filter((r) => r.info).length;
     const alertas = o.rows.filter((r) => r.info && diskAlerts(r.info).length > 0).length;
     const kpis: [string, string, string, RGB][] = [
-      ["Equipos", String(total), "incluidos en este informe", BLANCO],
-      ["Activos", String(activos), "responden a ping", BLANCO],
-      ["Consultados", String(consultados), "con datos de sistema", BLANCO],
-      ["Con alerta", String(alertas), `disco al ${ALERT_PCT} % o más`, alertas > 0 ? NARANJA : BLANCO],
+      [t("Equipos"), String(total), t("incluidos en este informe"), BLANCO],
+      [t("Activos"), String(activos), t("responden a ping"), BLANCO],
+      [t("Consultados"), String(consultados), t("con datos de sistema"), BLANCO],
+      [t("Con alerta"), String(alertas), t("disco al {n} % o más", { n: ALERT_PCT }), alertas > 0 ? NARANJA : BLANCO],
     ];
     const gap = 10;
     const cw = (bw - 32 - gap * 3) / 4;
@@ -349,7 +350,7 @@ export function generateReport(o: ReportOptions): Uint8Array {
     let iy = top + bh + 40;
     text(doc, [26, 26, 26]);
     doc.setFont("helvetica", "bold").setFontSize(16);
-    doc.text("Índice de contenidos", ML, iy);
+    doc.text(t("Índice de contenidos"), ML, iy);
     iy += 26;
     sections.forEach((s) => {
       fill(doc, AZUL_PRIM);
@@ -391,8 +392,8 @@ export function generateReport(o: ReportOptions): Uint8Array {
     doc.line(ML, fy - 10, W - MR, fy - 10);
     doc.setFont("helvetica", "normal").setFontSize(8);
     text(doc, GRIS_CLARO);
-    doc.text(`Generado con SGIIPP-IPSCANER v${__APP_VERSION__} · ${fechaHora(now)}`, ML, fy);
-    doc.text(`Pág. ${p - 1}`, W - MR, fy, { align: "right" });
+    doc.text(`${t("Generado con")} SGIIPP-IPSCANER v${__APP_VERSION__} · ${fechaHora(now)}`, ML, fy);
+    doc.text(`${t("Pág.")} ${p - 1}`, W - MR, fy, { align: "right" });
   }
 
   return new Uint8Array(doc.output("arraybuffer"));

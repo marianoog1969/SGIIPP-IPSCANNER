@@ -1,4 +1,5 @@
-import { Host, Info, KIND_LABEL, deviceKind, userOf, diskText, fmtRam, fmtUptime, shortOs } from "./lib";
+import { t } from "./i18n";
+import { Host, Info, kindLabel, deviceKind, userOf, diskText, fmtRam, fmtUptime, shortOs } from "./lib";
 
 export interface Row {
   h: Host;
@@ -17,8 +18,8 @@ const dash = "-";
 
 /** Columnas disponibles para los informes (las del listado + datos de la ficha). */
 export const COLS: Col[] = [
-  { key: "estado", label: "Estado", group: "lista", get: (r) => (r.h.alive ? "Activo" : "Solo ARP") },
-  { key: "tipo", label: "Tipo", group: "lista", get: (r) => KIND_LABEL[deviceKind(r.h, r.info)] },
+  { key: "estado", label: "Estado", group: "lista", get: (r) => (r.h.alive ? t("Activo") : t("Solo ARP")) },
+  { key: "tipo", label: "Tipo", group: "lista", get: (r) => kindLabel(deviceKind(r.h, r.info)) },
   { key: "nombre", label: "Nombre del equipo", group: "lista", get: (r) => r.h.name || dash },
   { key: "ip", label: "Dirección IP", group: "lista", get: (r) => r.h.ip },
   { key: "mac", label: "Dirección MAC", group: "lista", get: (r) => r.h.mac || dash },
@@ -55,5 +56,8 @@ export const COLS: Col[] = [
     get: (r) => (r.info?.uptime_s != null ? fmtUptime(r.info.uptime_s) : dash),
   },
 ];
+
+/** Etiqueta traducida de la columna. */
+export const colLabel = (c: Col) => t(c.label);
 
 export const DEFAULT_COLS = COLS.filter((c) => c.group === "lista").map((c) => c.key);

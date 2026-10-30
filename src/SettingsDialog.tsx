@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { t, type Lang } from "./i18n";
 
 export interface Settings {
   centro: string;
@@ -9,6 +10,7 @@ export interface Settings {
   dameware: string;
   damewareAuth: string;
   damewareArgs: string;
+  lang: Lang;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -20,6 +22,7 @@ export const DEFAULT_SETTINGS: Settings = {
   dameware: "",
   damewareAuth: "1",
   damewareArgs: "",
+  lang: "es",
 };
 
 export default function SettingsDialog({
@@ -41,45 +44,50 @@ export default function SettingsDialog({
 
   return (
     <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="modal" role="dialog" aria-label="Ajustes">
+      <div className="modal" role="dialog" aria-label={t("Ajustes")}>
         <div className="modal-head">
-          <h2>Ajustes</h2>
-          <button className="btn" onClick={onClose} title="Cerrar">✕</button>
+          <h2>{t("Ajustes")}</h2>
+          <button className="btn" onClick={onClose} title={t("Cerrar")}>✕</button>
         </div>
         <div className="modal-body">
           <p className="muted small">
-            Estos datos aparecen en la portada, la cabecera y el pie de los informes PDF. Se guardan en este
-            equipo.
+            {t("Estos datos aparecen en la portada, la cabecera y el pie de los informes PDF. Se guardan en este equipo.")}
           </p>
           <label className="field">
-            <span>Nombre del centro</span>
-            <input value={s.centro} onChange={set("centro")} placeholder="Ej.: CIS Guillermo Miranda" autoFocus />
+            <span>{t("Idioma")}</span>
+            <select value={s.lang} onChange={(e) => setS({ ...s, lang: e.target.value as Lang })}>
+              <option value="es">Español</option>
+              <option value="en">English</option>
+            </select>
           </label>
           <label className="field">
-            <span>Localidad</span>
-            <input value={s.localidad} onChange={set("localidad")} placeholder="Ej.: Murcia" />
+            <span>{t("Nombre del centro")}</span>
+            <input value={s.centro} onChange={set("centro")} placeholder={t("Ej.: CIS Guillermo Miranda")} autoFocus />
           </label>
           <label className="field">
-            <span>Organismo (opcional)</span>
-            <input value={s.organismo} onChange={set("organismo")} placeholder="Se muestra al pie de la portada" />
+            <span>{t("Localidad")}</span>
+            <input value={s.localidad} onChange={set("localidad")} placeholder={t("Ej.: Murcia")} />
+          </label>
+          <label className="field">
+            <span>{t("Organismo (opcional)")}</span>
+            <input value={s.organismo} onChange={set("organismo")} placeholder={t("Se muestra al pie de la portada")} />
           </label>
           <p className="muted small" style={{ marginTop: 14 }}>
-            Rendimiento. El escaneo es paralelo; más hilos = más rápido, pero más carga de red.
+            {t("Rendimiento. El escaneo es paralelo; más hilos = más rápido, pero más carga de red.")}
           </p>
           <label className="field">
-            <span>Hilos de escaneo simultáneos (10–500)</span>
+            <span>{t("Hilos de escaneo simultáneos (10–500)")}</span>
             <input type="number" min={10} max={500} value={s.hilos} onChange={num("hilos", 10, 500)} />
           </label>
           <label className="field">
-            <span>Consultas de detalle simultáneas (1–20)</span>
+            <span>{t("Consultas de detalle simultáneas (1–20)")}</span>
             <input type="number" min={1} max={20} value={s.consultas} onChange={num("consultas", 1, 20)} />
           </label>
           <p className="muted small" style={{ marginTop: 14 }}>
-            Control remoto. Escritorio remoto (RDP) usa el cliente de Windows. DameWare se detecta solo si está
-            instalado; si no, indica aquí la ruta de <code>DWRCC.exe</code>.
+            {t("Control remoto. Escritorio remoto (RDP) usa el cliente de Windows. DameWare se detecta solo si está instalado; si no, indica aquí la ruta de")} <code>DWRCC.exe</code>.
           </p>
           <label className="field">
-            <span>Ruta de DameWare (opcional)</span>
+            <span>{t("Ruta de DameWare (opcional)")}</span>
             <input
               value={s.dameware}
               onChange={set("dameware")}
@@ -87,27 +95,27 @@ export default function SettingsDialog({
             />
           </label>
           <label className="field">
-            <span>Autenticación de DameWare</span>
+            <span>{t("Autenticación de DameWare")}</span>
             <select value={s.damewareAuth} onChange={(e) => setS({ ...s, damewareAuth: e.target.value })}>
-              <option value="1">Windows NT Challenge/Response (recomendada)</option>
+              <option value="1">Windows NT Challenge/Response ({t("recomendada")})</option>
               <option value="2">Encrypted Windows Logon</option>
-              <option value="3">Smart card</option>
-              <option value="">Sin indicar (la que tenga DameWare)</option>
+              <option value="3">{t("Tarjeta inteligente")}</option>
+              <option value="">{t("Sin indicar (la que tenga DameWare)")}</option>
             </select>
           </label>
           <label className="field">
-            <span>Parámetros adicionales de DameWare (opcional)</span>
-            <input value={s.damewareArgs} onChange={set("damewareArgs")} placeholder="Ej.: -x:" />
+            <span>{t("Parámetros adicionales de DameWare (opcional)")}</span>
+            <input value={s.damewareArgs} onChange={set("damewareArgs")} placeholder={t("Ej.: -x:")} />
           </label>
           <p className="muted small" style={{ marginTop: 14 }}>
-            Registro de errores. Si el programa falla o se cierra, queda escrito en un archivo de registro.
+            {t("Registro de errores. Si el programa falla o se cierra, queda escrito en un archivo de registro.")}
           </p>
-          <button className="btn" onClick={onOpenLog}>Ver registro de errores</button>
+          <button className="btn" onClick={onOpenLog}>{t("Ver registro de errores")}</button>
         </div>
         <div className="modal-foot">
-          <button className="btn" onClick={() => setS(DEFAULT_SETTINGS)}>Restablecer</button>
+          <button className="btn" onClick={() => setS({ ...DEFAULT_SETTINGS, lang: s.lang })}>{t("Restablecer")}</button>
           <div className="spacer" />
-          <button className="btn" onClick={onClose}>Cancelar</button>
+          <button className="btn" onClick={onClose}>{t("Cancelar")}</button>
           <button
             className="btn primary"
             disabled={!s.centro.trim()}
@@ -116,7 +124,7 @@ export default function SettingsDialog({
               onClose();
             }}
           >
-            Guardar
+            {t("Guardar")}
           </button>
         </div>
       </div>

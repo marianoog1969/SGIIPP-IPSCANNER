@@ -1,4 +1,6 @@
-import changelog from "../CHANGELOG.md?raw";
+import changelogEs from "../CHANGELOG.md?raw";
+import changelogEn from "../CHANGELOG.en.md?raw";
+import { t, getLang } from "./i18n";
 
 interface Entry {
   version: string;
@@ -9,7 +11,7 @@ interface Entry {
 export function lastEntries(n: number): Entry[] {
   const out: Entry[] = [];
   let cur: Entry | null = null;
-  for (const line of changelog.split(/\r?\n/)) {
+  for (const line of (getLang() === "en" ? changelogEn : changelogEs).split(/\r?\n/)) {
     const h = line.match(/^## (\d+\.\d+\.\d+)\s*$/);
     if (h) {
       cur = { version: h[1], items: [] };
@@ -39,20 +41,20 @@ export default function NewsDialog({
   const entries = lastEntries(4);
   return (
     <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="modal" role="dialog" aria-label="Novedades">
+      <div className="modal" role="dialog" aria-label={t("Novedades")}>
         <div className="modal-head">
-          <h2>Novedades · v{__APP_VERSION__}</h2>
-          <button className="btn" onClick={onClose} title="Cerrar (Esc)">✕</button>
+          <h2>{t("Novedades")} · v{__APP_VERSION__}</h2>
+          <button className="btn" onClick={onClose} title={t("Cerrar (Esc)")}>✕</button>
         </div>
         <div className="modal-body news">
           {entries.map((e, i) => (
             <section key={e.version}>
               <h3>
-                Versión {e.version} {i === 0 && <span className="badge-new">Nueva</span>}
+                {t("Versión")} {e.version} {i === 0 && <span className="badge-new">{t("Nueva")}</span>}
               </h3>
               <ul>
-                {e.items.map((t, j) => (
-                  <li key={j}>{inline(t)}</li>
+                {e.items.map((it, j) => (
+                  <li key={j}>{inline(it)}</li>
                 ))}
               </ul>
             </section>
@@ -61,10 +63,10 @@ export default function NewsDialog({
         <div className="modal-foot">
           <label className="chk">
             <input type="checkbox" checked={hideOnStart} onChange={(e) => onHideChange(e.target.checked)} />
-            No mostrar al iniciar
+            {t("No mostrar al iniciar")}
           </label>
           <div className="spacer" />
-          <button className="btn primary" onClick={onClose} autoFocus>Entendido</button>
+          <button className="btn primary" onClick={onClose} autoFocus>{t("Entendido")}</button>
         </div>
       </div>
     </div>

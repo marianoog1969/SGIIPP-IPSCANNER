@@ -14,6 +14,13 @@ npm run version:minor    # novedades
 npm run version:major    # cambio mayor
 ```
 
+## 2.3.1
+- Botón **Donar** (PayPal) activado en la barra y en «Acerca de».
+
+## 2.3.0
+- Nuevo: interfaz en **español o inglés** (Ajustes → Idioma, o el botón ES/EN de la barra). Afecta a la interfaz, el manual, las novedades y los informes PDF.
+- Nuevo: botón **Donar** (PayPal) en la barra y en «Acerca de»; se muestra solo si hay un enlace configurado en `src/credits.ts`.
+
 ## 2.2.0
 - Nuevo: selección múltiple de equipos (casillas, Ctrl+clic, Mayús+clic) con barra de acciones en bloque: reiniciar, apagar, cancelar apagado y copiar IPs. Confirmación con la lista de equipos; este equipo se excluye.
 - Mejorado: las acciones remotas se ejecutan en segundo plano y no bloquean la ventana.

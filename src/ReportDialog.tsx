@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
-import { COLS, Row } from "./columns";
+import { COLS, Row, colLabel } from "./columns";
+import { t } from "./i18n";
 import { diskAlerts } from "./lib";
 import { generateReport } from "./pdf";
 import { saveBytes } from "./files";
@@ -30,7 +31,7 @@ export default function ReportDialog({
   const [cols, setCols] = useState<string[]>(initialCols);
   const [scope, setScope] = useState<Scope>("visible");
   const [orient, setOrient] = useState<Orient>("auto");
-  const [titulo, setTitulo] = useState("Informe de red");
+  const [titulo, setTitulo] = useState(t("Informe de red"));
   const [obs, setObs] = useState("");
   const [discos, setDiscos] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -53,14 +54,14 @@ export default function ReportDialog({
         titulo,
         observaciones: obs,
         alcance:
-          scope === "visible" ? "según el listado" : scope === "all" ? "todos los equipos" : "solo equipos con alerta",
+          scope === "visible" ? t("según el listado") : scope === "all" ? t("todos los equipos") : t("solo equipos con alerta"),
         cols: selCols,
         rows,
         orientation,
         incluirDiscos: discos,
       });
       const stamp = new Date().toISOString().slice(0, 10);
-      const path = await saveBytes(`informe_red_${stamp}.pdf`, "Documento PDF", "pdf", bytes);
+      const path = await saveBytes(`${t("informe_red")}_${stamp}.pdf`, t("Documento PDF"), "pdf", bytes);
       if (path) {
         onSaved(path);
         onClose();
@@ -79,7 +80,7 @@ export default function ReportDialog({
         {COLS.filter((c) => c.group === g).map((c) => (
           <label key={c.key} className="chk2">
             <input type="checkbox" checked={cols.includes(c.key)} onChange={() => toggle(c.key)} />
-            {c.label}
+            {colLabel(c)}
           </label>
         ))}
       </div>
@@ -88,36 +89,36 @@ export default function ReportDialog({
 
   return (
     <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="modal wide" role="dialog" aria-label="Informe PDF">
+      <div className="modal wide" role="dialog" aria-label={t("Informe PDF")}>
         <div className="modal-head">
-          <h2>Informe PDF</h2>
-          <button className="btn" onClick={onClose} title="Cerrar">✕</button>
+          <h2>{t("Informe PDF")}</h2>
+          <button className="btn" onClick={onClose} title={t("Cerrar")}>✕</button>
         </div>
         <div className="modal-body">
           <div className="center-line">
             <span>
-              Centro: <b>{settings.centro || "—"}</b>
+              {t("Centro")}: <b>{settings.centro || "—"}</b>
               {settings.localidad && <> · {settings.localidad}</>}
             </span>
-            <button className="link" onClick={onOpenSettings}>Cambiar en Ajustes</button>
+            <button className="link" onClick={onOpenSettings}>{t("Cambiar en Ajustes")}</button>
           </div>
 
           <label className="field">
-            <span>Título del informe</span>
+            <span>{t("Título del informe")}</span>
             <input value={titulo} onChange={(e) => setTitulo(e.target.value)} />
           </label>
 
-          {group("lista", "Columnas del listado")}
-          {group("ficha", "Datos adicionales de la ficha")}
+          {group("lista", t("Columnas del listado"))}
+          {group("ficha", t("Datos adicionales de la ficha"))}
 
           <div className="two">
             <fieldset className="group">
-              <legend>Equipos a incluir</legend>
+              <legend>{t("Equipos a incluir")}</legend>
               {(
                 [
-                  ["visible", `Lo que muestra el listado ahora (${visible.length})`],
-                  ["all", `Todos los equipos (${all.length})`],
-                  ["alerts", `Solo equipos con alerta de disco (${alertRows.length})`],
+                  ["visible", t("Lo que muestra el listado ahora ({n})", { n: visible.length })],
+                  ["all", t("Todos los equipos ({n})", { n: all.length })],
+                  ["alerts", t("Solo equipos con alerta de disco ({n})", { n: alertRows.length })],
                 ] as [Scope, string][]
               ).map(([v, label]) => (
                 <label key={v} className="chk2">
@@ -127,12 +128,12 @@ export default function ReportDialog({
               ))}
             </fieldset>
             <fieldset className="group">
-              <legend>Página</legend>
+              <legend>{t("Página")}</legend>
               {(
                 [
-                  ["auto", "Automática"],
-                  ["portrait", "Vertical"],
-                  ["landscape", "Horizontal"],
+                  ["auto", t("Automática")],
+                  ["portrait", t("Vertical")],
+                  ["landscape", t("Horizontal")],
                 ] as [Orient, string][]
               ).map(([v, label]) => (
                 <label key={v} className="chk2">
@@ -142,26 +143,26 @@ export default function ReportDialog({
               ))}
               <label className="chk2 top">
                 <input type="checkbox" checked={discos} onChange={(e) => setDiscos(e.target.checked)} />
-                Añadir apartado «Discos con alerta»
+                {t("Añadir apartado «Discos con alerta»")}
               </label>
             </fieldset>
           </div>
 
           <label className="field">
-            <span>Observaciones (opcional)</span>
-            <textarea rows={3} value={obs} onChange={(e) => setObs(e.target.value)} placeholder="Texto que se añadirá como último apartado del informe" />
+            <span>{t("Observaciones (opcional)")}</span>
+            <textarea rows={3} value={obs} onChange={(e) => setObs(e.target.value)} placeholder={t("Texto que se añadirá como último apartado del informe")} />
           </label>
 
           {error && <p className="err">{error}</p>}
         </div>
         <div className="modal-foot">
           <span className="muted small">
-            {rows.length} equipos · {selCols.length} columnas · {orientation === "landscape" ? "horizontal" : "vertical"}
+            {t("{a} equipos · {b} columnas · {o}", { a: rows.length, b: selCols.length, o: orientation === "landscape" ? t("horizontal") : t("vertical") })}
           </span>
           <div className="spacer" />
-          <button className="btn" onClick={onClose}>Cancelar</button>
+          <button className="btn" onClick={onClose}>{t("Cancelar")}</button>
           <button className="btn primary" disabled={busy || !selCols.length || !rows.length} onClick={generate}>
-            {busy ? "Generando…" : "Generar PDF"}
+            {busy ? t("Generando…") : t("Generar PDF")}
           </button>
         </div>
       </div>

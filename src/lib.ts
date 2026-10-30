@@ -1,3 +1,5 @@
+import { t } from "./i18n";
+
 export interface Host {
   ip: string;
   name: string;
@@ -76,19 +78,19 @@ export const pctClass = (p: number) => (p >= 90 ? "bad" : p >= 75 ? "warn" : "")
 
 export const ficha = (h: Host, i: Info) =>
   [
-    `Equipo: ${h.name || "—"}`,
+    `${t("Equipo")}: ${h.name || "—"}`,
     `IP: ${h.ip}`,
     `MAC: ${h.mac || "—"}`,
-    i.os && `Sistema: ${i.os}${i.arch ? ` (${i.arch})` : ""}`,
-    i.version && `Versión: ${i.version}${i.build ? ` (build ${i.build})` : ""}`,
-    (i.manufacturer || i.model) && `Modelo: ${[i.manufacturer, i.model].filter(Boolean).join(" ")}`,
-    i.serial && `Nº de serie: ${i.serial}`,
-    i.cpu && `Procesador: ${i.cpu}`,
+    i.os && `${t("Sistema")}: ${i.os}${i.arch ? ` (${i.arch})` : ""}`,
+    i.version && `${t("Versión")}: ${i.version}${i.build ? ` (build ${i.build})` : ""}`,
+    (i.manufacturer || i.model) && `${t("Modelo")}: ${[i.manufacturer, i.model].filter(Boolean).join(" ")}`,
+    i.serial && `${t("Nº de serie")}: ${i.serial}`,
+    i.cpu && `${t("Procesador")}: ${i.cpu}`,
     i.ram_total && `RAM: ${fmtBytes(i.ram_total)}`,
-    userOf(i) && `Último usuario: ${userOf(i)}`,
-    i.domain && `Dominio: ${i.domain}`,
+    userOf(i) && `${t("Último usuario")}: ${userOf(i)}`,
+    i.domain && `${t("Dominio")}: ${i.domain}`,
     ...i.disks.map(
-      (d) => `Disco ${d.letter} ${d.label}: ${fmtBytes(d.free)} libres de ${fmtBytes(d.total)}`
+      (d) => `${t("Disco")} ${d.letter} ${d.label}: ${t("{free} libres de {total}", { free: fmtBytes(d.free), total: fmtBytes(d.total) })}`
     ),
   ]
     .filter(Boolean)
@@ -121,6 +123,7 @@ export const ipNum = (ip: string) =>
 
 export type DeviceKind = "pc" | "server" | "printer" | "router" | "tv" | "phone" | "camera" | "other";
 
+/** Etiquetas en español (clave de traducción); usa kindLabel() para mostrarlas. */
 export const KIND_LABEL: Record<DeviceKind, string> = {
   pc: "Ordenador",
   server: "Servidor",
@@ -156,3 +159,5 @@ export function deviceKind(h: Host, info?: Info | null): DeviceKind {
   if (h.mac && randomMac(h.mac)) return "phone";
   return "other";
 }
+
+export const kindLabel = (k: DeviceKind) => t(KIND_LABEL[k]);

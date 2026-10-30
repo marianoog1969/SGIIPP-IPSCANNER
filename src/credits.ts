@@ -9,3 +9,9 @@ export const CREDITS = {
     ["jsPDF + AutoTable", "informes PDF"],
   ] as [string, string][],
 };
+
+/**
+ * Enlace de donación de PayPal (https://www.paypal.com/... o https://paypal.me/...).
+ * Mientras esté vacío, el botón «Donar» no se muestra.
+ */
+export const PAYPAL_URL = "https://www.paypal.me/marianoog";

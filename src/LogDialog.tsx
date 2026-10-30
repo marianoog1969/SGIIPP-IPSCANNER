@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { t } from "./i18n";
 
 interface LogInfo {
   path: string;
@@ -7,7 +8,7 @@ interface LogInfo {
   text: string;
 }
 
-export default function LogDialog({ onClose, notify }: { onClose: () => void; notify: (t: string) => void }) {
+export default function LogDialog({ onClose, notify }: { onClose: () => void; notify: (text: string) => void }) {
   const [info, setInfo] = useState<LogInfo | null>(null);
   const [err, setErr] = useState("");
 
@@ -21,43 +22,43 @@ export default function LogDialog({ onClose, notify }: { onClose: () => void; no
 
   return (
     <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="modal wide" role="dialog" aria-label="Registro de errores">
+      <div className="modal wide" role="dialog" aria-label={t("Registro de errores")}>
         <div className="modal-head">
-          <h2>Registro de errores</h2>
-          <button className="btn" onClick={onClose} title="Cerrar (Esc)">✕</button>
+          <h2>{t("Registro de errores")}</h2>
+          <button className="btn" onClick={onClose} title={t("Cerrar (Esc)")}>✕</button>
         </div>
         <div className="modal-body">
           {info?.crashed && (
             <p className="err">
-              ⚠ La última vez el programa se cerró de forma inesperada. Las últimas líneas anteriores a la marca «sesión anterior terminó…» indican qué estaba haciendo.
+              ⚠ {t("La última vez el programa se cerró de forma inesperada. Las últimas líneas anteriores a la marca «sesión anterior terminó…» indican qué estaba haciendo.")}
             </p>
           )}
           {err && <p className="err">{err}</p>}
           {info && (
             <p className="muted small">
-              Archivo: <code>{info.path}</code> (últimas 300 líneas)
+              {t("Archivo")}: <code>{info.path}</code> ({t("últimas 300 líneas")})
             </p>
           )}
-          <pre className="logbox">{info ? info.text || "El registro está vacío." : "Cargando…"}</pre>
+          <pre className="logbox">{info ? info.text || t("El registro está vacío.") : t("Cargando…")}</pre>
         </div>
         <div className="modal-foot">
-          <button className="btn" onClick={load}>↻ Actualizar</button>
+          <button className="btn" onClick={load}>↻ {t("Actualizar")}</button>
           <button
             className="btn"
             onClick={() => {
               navigator.clipboard.writeText(info?.text ?? "").then(
-                () => notify("Registro copiado"),
-                () => notify("No se pudo copiar")
+                () => notify(t("Registro copiado")),
+                () => notify(t("No se pudo copiar"))
               );
             }}
           >
-            Copiar
+            {t("Copiar")}
           </button>
           <button className="btn" onClick={() => invoke("open_log_dir").catch((e) => setErr(String(e)))}>
-            Abrir carpeta
+            {t("Abrir carpeta")}
           </button>
           <div className="spacer" />
-          <button className="btn primary" onClick={onClose}>Cerrar</button>
+          <button className="btn primary" onClick={onClose}>{t("Cerrar")}</button>
         </div>
       </div>
     </div>

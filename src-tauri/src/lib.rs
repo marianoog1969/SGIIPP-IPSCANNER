@@ -274,6 +274,30 @@ fn log_info(state: State<'_, LogState>) -> LogInfo {
 }
 
 #[tauri::command]
+fn open_url(url: String) -> Result<(), String> {
+    // Solo enlaces de donación de PayPal
+    let ok = ["https://www.paypal.com/", "https://paypal.me/", "https://www.paypal.me/"]
+        .iter()
+        .any(|p| url.starts_with(p))
+        && !url.contains(char::is_whitespace);
+    if !ok {
+        return Err("Enlace no permitido".into());
+    }
+    #[cfg(windows)]
+    {
+        std::process::Command::new("explorer.exe")
+            .arg(&url)
+            .spawn()
+            .map(|_| ())
+            .map_err(|e| format!("No se pudo abrir el navegador: {e}"))
+    }
+    #[cfg(not(windows))]
+    {
+        Err(format!("Abre {url} en el navegador"))
+    }
+}
+
+#[tauri::command]
 fn open_log_dir() -> Result<(), String> {
     #[cfg(windows)]
     {
@@ -334,7 +358,8 @@ pub fn run() {
             open_remote,
             log_event,
             log_info,
-            open_log_dir
+            open_log_dir,
+            open_url
         ])
         .build(tauri::generate_context!())
         .unwrap_or_else(|e| {

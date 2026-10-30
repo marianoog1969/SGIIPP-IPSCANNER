@@ -1,12 +1,12 @@
-import { DeviceKind, KIND_LABEL } from "./lib";
+import { DeviceKind, kindLabel } from "./lib";
 
 const P = { fill: "none", stroke: "currentColor", strokeWidth: 1.6, strokeLinecap: "round", strokeLinejoin: "round" } as const;
 
 /** Icono del tipo de dispositivo (ordenador, servidor, impresora u otro). */
 export default function DeviceIcon({ kind }: { kind: DeviceKind }) {
   return (
-    <svg className={`devico ${kind}`} width="16" height="16" viewBox="0 0 24 24" aria-label={KIND_LABEL[kind]}>
-      <title>{KIND_LABEL[kind]}</title>
+    <svg className={`devico ${kind}`} width="16" height="16" viewBox="0 0 24 24" aria-label={kindLabel(kind)}>
+      <title>{kindLabel(kind)}</title>
       {kind === "pc" && (
         <g {...P}>
           <rect x="3" y="4" width="18" height="12" rx="1.5" />

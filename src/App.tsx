@@ -33,6 +33,8 @@ import NewsDialog from "./NewsDialog";
 import LogDialog from "./LogDialog";
 import AboutDialog from "./AboutDialog";
 import { logEvent } from "./log";
+import { t, tn, setLang, initialLang, locale } from "./i18n";
+import DonateButton from "./DonateButton";
 import SettingsDialog, { DEFAULT_SETTINGS, Settings } from "./SettingsDialog";
 
 function AlertIcon({ info }: { info?: Info }) {
@@ -40,7 +42,7 @@ function AlertIcon({ info }: { info?: Info }) {
   const a = diskAlerts(info);
   if (!a.length) return null;
   const tip = a
-    .map((x) => `${x.d.letter} ${x.d.label}`.trim() + `: ${x.p}% ocupado (${fmtBytes(x.d.free)} libres)`)
+    .map((x) => `${x.d.letter} ${x.d.label}`.trim() + `: ${t("{p}% ocupado ({free} libres)", { p: x.p, free: fmtBytes(x.d.free) })}`)
     .join("\n");
   return (
     <span className="alert bad" title={tip}>
@@ -104,6 +106,7 @@ export default function App() {
   const [onlyAlerts, setOnlyAlerts] = useState(prefs.onlyAlerts ?? false);
   const [kindFilter, setKindFilter] = useState<string>(prefs.kindFilter || "all");
   const [settings, setSettings] = useState<Settings>({ ...DEFAULT_SETTINGS, ...prefs.settings });
+  setLang(initialLang(settings.lang));
   const [reportCols, setReportCols] = useState<string[]>(prefs.reportCols ?? DEFAULT_COLS);
   const [dialog, setDialog] = useState<null | "report" | "manual" | "news" | "log" | "about">(prefs.hideNews ? null : "news");
   const [hideNews, setHideNews] = useState(prefs.hideNews ?? false);
@@ -123,6 +126,11 @@ export default function App() {
       /* sin almacenamiento: no pasa nada */
     }
   }, [range, autoCheck, onlyAlerts, kindFilter, hideNews, sort, settings, reportCols]);
+
+  // El texto de estado del pie queda en el idioma antiguo: se limpia al cambiar de idioma
+  useEffect(() => {
+    setMsg("");
+  }, [settings.lang]);
 
   const notify = (text: string) => {
     setToast(text);
@@ -193,8 +201,8 @@ export default function App() {
           }
           setMsg(
             e.payload.cancelled
-              ? `Escaneo detenido · ${e.payload.found} equipos`
-              : `Escaneo completado · ${e.payload.found} equipos`
+              ? t("Escaneo detenido · {n} equipos", { n: e.payload.found })
+              : t("Escaneo completado · {n} equipos", { n: e.payload.found })
           );
         }),
       ];
@@ -351,7 +359,7 @@ export default function App() {
     if (s.loading) return <span className="skel" />;
     if (s.error)
       return (
-        <span className="muted" title={`No se pudo consultar: ${s.error}`}>
+        <span className="muted" title={`${t("No se pudo consultar")}: ${s.error}`}>
           {label}
         </span>
       );
@@ -361,10 +369,10 @@ export default function App() {
   const diskCell = (h: Host) => {
     const i = infos.get(h.ip)?.info;
     const w = i ? worstDisk(i) : null;
-    if (!i || !w) return infoCell(h, i ? "Sin discos" : null);
+    if (!i || !w) return infoCell(h, i ? t("Sin discos") : null);
     const tip = i.disks
       .filter((d) => d.total > 0)
-      .map((d) => `${`${d.letter} ${d.label}`.trim()}: ${diskPct(d)}% ocupado (${fmtBytes(d.free)} libres)`)
+      .map((d) => `${`${d.letter} ${d.label}`.trim()}: ${t("{p}% ocupado ({free} libres)", { p: diskPct(d), free: fmtBytes(d.free) })}`)
       .join("\n");
     return (
       <span className="light" title={tip}>
@@ -386,22 +394,25 @@ export default function App() {
   }, [settings.dameware]);
 
   type RemoteKind = "rdp" | "dameware" | "web" | "share" | "ping" | "shutdown" | "reboot" | "abort";
-  const REMOTE_MSG: Record<RemoteKind, string> = {
-    rdp: "Escritorio remoto: conectando a",
-    dameware: "DameWare: conectando a",
-    web: "Abriendo en el navegador",
-    share: "Abriendo recurso compartido de",
-    ping: "Ping continuo a",
-    shutdown: "Apagado en 30 s:",
-    reboot: "Reinicio en 30 s:",
-    abort: "Apagado cancelado:",
-  };
+  const REMOTE_MSG = (k: RemoteKind) =>
+    ({
+      rdp: t("Escritorio remoto: conectando a"),
+      dameware: t("DameWare: conectando a"),
+      web: t("Abriendo en el navegador"),
+      share: t("Abriendo recurso compartido de"),
+      ping: t("Ping continuo a"),
+      shutdown: t("Apagado en 30 s:"),
+      reboot: t("Reinicio en 30 s:"),
+      abort: t("Apagado cancelado:"),
+    })[k];
   const openRemote = async (kind: RemoteKind, h: Host) => {
     const label = h.name ? `${h.name} (${h.ip})` : h.ip;
     if (kind === "shutdown" || kind === "reboot") {
       const ok = await confirm(
-        `¿${kind === "shutdown" ? "Apagar" : "Reiniciar"} el equipo ${label}?\n\nSe ejecutará en 30 segundos con tu usuario de Windows (necesita permisos de administrador en ese equipo). Podrás cancelarlo desde el menú.`,
-        { title: kind === "shutdown" ? "Apagar equipo" : "Reiniciar equipo", kind: "warning", okLabel: kind === "shutdown" ? "Apagar" : "Reiniciar", cancelLabel: "Cancelar" }
+        t(kind === "shutdown" ? "¿Apagar el equipo {label}?" : "¿Reiniciar el equipo {label}?", { label }) +
+          "\n\n" +
+          t("Se ejecutará en 30 segundos con tu usuario de Windows (necesita permisos de administrador en ese equipo). Podrás cancelarlo desde el menú."),
+        { title: kind === "shutdown" ? t("Apagar equipo") : t("Reiniciar equipo"), kind: "warning", okLabel: kind === "shutdown" ? t("Apagar") : t("Reiniciar"), cancelLabel: t("Cancelar") }
       );
       if (!ok) return;
     }
@@ -415,7 +426,7 @@ export default function App() {
         user: cred.user || null,
         password: cred.user ? cred.pass : null,
       });
-      notify(`${REMOTE_MSG[kind]} ${label}`);
+      notify(`${REMOTE_MSG(kind)} ${label}`);
     } catch (e) {
       logEvent("warn", `Acción remota ${kind} sobre ${h.ip}: ${e}`);
       setError(String(e));
@@ -445,14 +456,15 @@ export default function App() {
     const all = [...hosts.values()].filter((h) => marked.has(h.ip));
     const targets = all.filter((h) => !ownIps.has(h.ip));
     const skipped = all.length - targets.length;
-    if (!targets.length) return setError("No hay equipos válidos: este propio equipo no se apaga ni reinicia desde aquí.");
-    const verb = kind === "shutdown" ? "Apagar" : kind === "reboot" ? "Reiniciar" : "Cancelar el apagado/reinicio de";
+    if (!targets.length) return setError(t("No hay equipos válidos: este propio equipo no se apaga ni reinicia desde aquí."));
+    const verb = kind === "shutdown" ? t("Apagar") : t("Reiniciar");
     if (kind !== "abort") {
       const names = targets.slice(0, 12).map((h) => `• ${h.name || h.ip} (${h.ip})`).join("\n");
-      const more = targets.length > 12 ? `\n… y ${targets.length - 12} más` : "";
+      const more = targets.length > 12 ? `\n${t("… y {n} más", { n: targets.length - 12 })}` : "";
+      const q = kind === "shutdown" ? tn(targets.length, "¿Apagar {n} equipo?", "¿Apagar {n} equipos?") : tn(targets.length, "¿Reiniciar {n} equipo?", "¿Reiniciar {n} equipos?");
       const ok = await confirm(
-        `¿${verb} ${targets.length} equipo${targets.length > 1 ? "s" : ""}?\n\n${names}${more}\n\nSe ejecutará en 30 segundos con tu usuario de Windows y podrás cancelarlo desde esta barra.${skipped ? "\n\n(Este propio equipo se ha excluido.)" : ""}`,
-        { title: `${verb} ${targets.length} equipos`, kind: "warning", okLabel: verb, cancelLabel: "Cancelar" }
+        `${q}\n\n${names}${more}\n\n${t("Se ejecutará en 30 segundos con tu usuario de Windows y podrás cancelarlo desde esta barra.")}${skipped ? `\n\n${t("(Este propio equipo se ha excluido.)")}` : ""}`,
+        { title: q, kind: "warning", okLabel: verb, cancelLabel: t("Cancelar") }
       );
       if (!ok) return;
     }
@@ -467,22 +479,22 @@ export default function App() {
       .filter(Boolean) as string[];
     fails.forEach((f) => logEvent("warn", `${kind} masivo: ${f}`));
     const okN = targets.length - fails.length;
-    notify(`${REMOTE_MSG[kind]} ${okN} equipo${okN === 1 ? "" : "s"}${fails.length ? ` · ${fails.length} con error` : ""}`);
-    if (fails.length) setError(`${fails.length} equipo(s) con error:\n${fails.slice(0, 5).join("\n")}${fails.length > 5 ? "\n…" : ""}`);
+    notify(`${REMOTE_MSG(kind)} ${tn(okN, "{n} equipo", "{n} equipos")}${fails.length ? ` · ${t("{n} con error", { n: fails.length })}` : ""}`);
+    if (fails.length) setError(`${t("{n} equipo(s) con error:", { n: fails.length })}\n${fails.slice(0, 5).join("\n")}${fails.length > 5 ? "\n…" : ""}`);
   };
 
   const copy = async (text: string, what: string) => {
     try {
       await navigator.clipboard.writeText(text);
-      notify(`${what} copiado`);
+      notify(t("{what} copiado", { what }));
     } catch {
-      setError("No se pudo copiar al portapapeles");
+      setError(t("No se pudo copiar al portapapeles"));
     }
   };
 
   const toTable = (sep: string) =>
     [
-      ["Nombre", "IP", "MAC", "Sistema", "RAM", "Almacenamiento"].join(sep),
+      [t("Nombre"), "IP", "MAC", t("Sistema"), "RAM", t("Almacenamiento")].join(sep),
       ...rows.map((h) =>
         [h.name, h.ip, h.mac, osOf(h), ramOf(h) ? fmtRam(ramOf(h)) : "", diskText(infos.get(h.ip)?.info)].join(sep)
       ),
@@ -493,7 +505,7 @@ export default function App() {
     const csv =
       "﻿" +
       [
-        "Nombre;IP;MAC;Sistema;RAM;Almacenamiento",
+        [t("Nombre"), "IP", "MAC", t("Sistema"), "RAM", t("Almacenamiento")].join(";"),
         ...rows.map((h) =>
           [h.name, h.ip, h.mac, osOf(h), ramOf(h) ? fmtRam(ramOf(h)) : "", diskText(infos.get(h.ip)?.info)]
             .map(esc)
@@ -501,12 +513,12 @@ export default function App() {
         ),
       ].join("\r\n");
     saveBytes(
-      `escaneo_red_${new Date().toISOString().slice(0, 10)}.csv`,
-      "CSV (Excel)",
+      `${t("escaneo_red")}_${new Date().toISOString().slice(0, 10)}.csv`,
+      t("CSV (Excel)"),
       "csv",
       new TextEncoder().encode(csv)
     )
-      .then((path) => path && notify("CSV guardado"))
+      .then((path) => path && notify(t("CSV guardado")))
       .catch((e) => setError(String(e)));
   };
 
@@ -551,14 +563,14 @@ export default function App() {
   return (
     <div className="app">
       <header className="toolbar">
-        <div className="brand clickable" onClick={() => setDialog("about")} title="Acerca de SGIIPP-IPSCANER">
+        <div className="brand clickable" onClick={() => setDialog("about")} title={t("Acerca de SGIIPP-IPSCANER")}>
           <b>SGIIPP-IPSCANER</b>
           <span title={settings.localidad ? `${settings.centro} · ${settings.localidad}` : settings.centro}>
             {settings.centro}
           </span>
         </div>
         <div className="range">
-          <label>Rango</label>
+          <label>{t("Rango")}</label>
           <input
             value={range}
             onChange={(e) => setRange(e.target.value)}
@@ -572,9 +584,9 @@ export default function App() {
               value=""
               onChange={(e) => e.target.value && setRange(e.target.value)}
               disabled={scanning}
-              title="Redes detectadas en este equipo"
+              title={t("Redes detectadas en este equipo")}
             >
-              <option value="">Mis redes…</option>
+              <option value="">{t("Mis redes…")}</option>
               {networks.map((n) => (
                 <option key={n.name + n.ip} value={n.cidr}>
                   {n.cidr} ({n.ip})
@@ -584,20 +596,28 @@ export default function App() {
           )}
         </div>
         {scanning ? (
-          <button className="btn danger" onClick={stop}>■ Detener · {pct}%</button>
+          <button className="btn danger" onClick={stop}>■ {t("Detener")} · {pct}%</button>
         ) : (
-          <button className="btn primary" onClick={start} disabled={!range.trim()}>▶ Escanear</button>
+          <button className="btn primary" onClick={start} disabled={!range.trim()}>▶ {t("Escanear")}</button>
         )}
         <div className="tools">
-          <button className="btn icon" onClick={() => setShowSettings(true)} title="Ajustes (nombre del centro)">⚙</button>
-          <button className="btn icon" onClick={() => setDialog("manual")} title="Manual de usuario (F1)">?</button>
+          <DonateButton compact />
+          <button
+            className="btn icon lang"
+            onClick={() => setSettings((st) => ({ ...st, lang: st.lang === "en" ? "es" : "en" }))}
+            title={t("Cambiar idioma")}
+          >
+            {settings.lang === "en" ? "ES" : "EN"}
+          </button>
+          <button className="btn icon" onClick={() => setShowSettings(true)} title={t("Ajustes (nombre del centro)")}>⚙</button>
+          <button className="btn icon" onClick={() => setDialog("manual")} title={t("Manual de usuario (F1)")}>?</button>
         </div>
       </header>
 
       {error && (
         <div className="banner" role="alert">
           <span>{error}</span>
-          <button onClick={() => setError("")} title="Cerrar">✕</button>
+          <button onClick={() => setError("")} title={t("Cerrar")}>✕</button>
         </div>
       )}
 
@@ -607,17 +627,17 @@ export default function App() {
           className="filter"
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
-          placeholder="Filtrar por nombre, IP, MAC o usuario…"
+          placeholder={t("Filtrar por nombre, IP, MAC o usuario…")}
         />
-        <div className="seg" role="group" aria-label="Filtrar por tipo">
+        <div className="seg" role="group" aria-label={t("Filtrar por tipo")}>
           {([
-            ["all", "Todos", hosts.size],
-            ["pc", "Ordenadores", kindCount.pc],
-            ["printer", "Impresoras", kindCount.printer],
-            ["router", "Routers y red", kindCount.router],
-            ["tv", "TV y multimedia", kindCount.tv],
-            ["phone", "Móviles y teléfonos", kindCount.phone],
-            ["other", "Otros", kindCount.other],
+            ["all", t("Todos"), hosts.size],
+            ["pc", t("Ordenadores"), kindCount.pc],
+            ["printer", t("Impresoras"), kindCount.printer],
+            ["router", t("Routers y red"), kindCount.router],
+            ["tv", t("TV y multimedia"), kindCount.tv],
+            ["phone", t("Móviles y teléfonos"), kindCount.phone],
+            ["other", t("Otros"), kindCount.other],
           ] as const).map(([k, label, n]) => (
             <button
               key={k}
@@ -626,17 +646,17 @@ export default function App() {
               title={`${label} (${n})`}
             >
               {k !== "all" && <DeviceIcon kind={k} />}
-              {k === "all" ? "Todos" : ""} <span className="n">{n}</span>
+              {k === "all" ? t("Todos") : ""} <span className="n">{n}</span>
             </button>
           ))}
         </div>
-        <label className="chk" title="Consulta los discos de los equipos al terminar el escaneo">
+        <label className="chk" title={t("Consulta los discos de los equipos al terminar el escaneo")}>
           <input type="checkbox" checked={autoCheck} onChange={(e) => setAutoCheck(e.target.checked)} />
-          Comprobar discos
+          {t("Comprobar discos")}
         </label>
         <label className="chk">
           <input type="checkbox" checked={onlyAlerts} onChange={(e) => setOnlyAlerts(e.target.checked)} />
-          Solo con alertas
+          {t("Solo con alertas")}
         </label>
         <div className="spacer" />
         <button
@@ -647,18 +667,18 @@ export default function App() {
             setInfos(new Map());
             setAutoCheck(true);
           }}
-          title="Volver a consultar discos, RAM y sistema de todos los equipos"
+          title={t("Volver a consultar discos, RAM y sistema de todos los equipos")}
         >
-          ↻ Recomprobar
+          ↻ {t("Recomprobar")}
         </button>
-        <button className="btn" disabled={!rows.length} onClick={() => copy(toTable("\t"), "Listado")}>
-          Copiar
+        <button className="btn" disabled={!rows.length} onClick={() => copy(toTable("\t"), t("Listado"))}>
+          {t("Copiar")}
         </button>
         <button className="btn" disabled={!rows.length} onClick={exportCsv}>
-          Exportar CSV
+          {t("Exportar CSV")}
         </button>
         <button className="btn primary" disabled={!hosts.size} onClick={() => setDialog("report")}>
-          Informe PDF
+          {t("Informe PDF")}
         </button>
       </div>
 
@@ -667,11 +687,11 @@ export default function App() {
       )}
 
       {marked.size > 0 && (
-        <div className="selbar" role="toolbar" aria-label="Acciones sobre los equipos seleccionados">
-          <b>{marked.size} seleccionado{marked.size > 1 ? "s" : ""}</b>
-          <button className="btn" disabled={!remote.rdp} onClick={() => bulkPower("reboot")} title="Reiniciar en 30 s">Reiniciar</button>
-          <button className="btn danger" disabled={!remote.rdp} onClick={() => bulkPower("shutdown")} title="Apagar en 30 s">Apagar</button>
-          <button className="btn" disabled={!remote.rdp} onClick={() => bulkPower("abort")} title="Cancelar apagado o reinicio pendiente">Cancelar apagado</button>
+        <div className="selbar" role="toolbar" aria-label={t("Acciones sobre los equipos seleccionados")}>
+          <b>{tn(marked.size, "{n} seleccionado", "{n} seleccionados")}</b>
+          <button className="btn" disabled={!remote.rdp} onClick={() => bulkPower("reboot")} title={t("Reiniciar en 30 s")}>{t("Reiniciar")}</button>
+          <button className="btn danger" disabled={!remote.rdp} onClick={() => bulkPower("shutdown")} title={t("Apagar en 30 s")}>{t("Apagar")}</button>
+          <button className="btn" disabled={!remote.rdp} onClick={() => bulkPower("abort")} title={t("Cancelar apagado o reinicio pendiente")}>{t("Cancelar apagado")}</button>
           <button
             className="btn"
             onClick={() =>
@@ -681,10 +701,10 @@ export default function App() {
               )
             }
           >
-            Copiar IPs
+            {t("Copiar IPs")}
           </button>
           <div className="spacer" />
-          <button className="btn" onClick={() => setMarked(new Set())} title="Quitar la selección (Esc)">Limpiar selección</button>
+          <button className="btn" onClick={() => setMarked(new Set())} title={t("Quitar la selección (Esc)")}>{t("Limpiar selección")}</button>
         </div>
       )}
       <div className="content">
@@ -695,8 +715,8 @@ export default function App() {
               <th className="c-chk">
                 <input
                   type="checkbox"
-                  aria-label="Seleccionar todos los equipos visibles"
-                  title="Seleccionar todos los equipos visibles"
+                  aria-label={t("Seleccionar todos los equipos visibles")}
+                  title={t("Seleccionar todos los equipos visibles")}
                   checked={rows.length > 0 && rows.every((h) => marked.has(h.ip))}
                   onChange={(e) =>
                     setMarked((p) => {
@@ -708,14 +728,14 @@ export default function App() {
                 />
               </th>
               <th className="c-state" />
-              <th onClick={() => toggleSort("name")}>Nombre del equipo{arrow("name")}</th>
-              <th onClick={() => toggleSort("ip")}>Dirección IP{arrow("ip")}</th>
-              <th onClick={() => toggleSort("mac")}>Dirección MAC{arrow("mac")}</th>
-              <th onClick={() => toggleSort("user")}>Último usuario{arrow("user")}</th>
-              <th onClick={() => toggleSort("os")}>Sistema operativo{arrow("os")}</th>
+              <th onClick={() => toggleSort("name")}>{t("Nombre del equipo")}{arrow("name")}</th>
+              <th onClick={() => toggleSort("ip")}>{t("Dirección IP")}{arrow("ip")}</th>
+              <th onClick={() => toggleSort("mac")}>{t("Dirección MAC")}{arrow("mac")}</th>
+              <th onClick={() => toggleSort("user")}>{t("Último usuario")}{arrow("user")}</th>
+              <th onClick={() => toggleSort("os")}>{t("Sistema operativo")}{arrow("os")}</th>
               <th className="num" onClick={() => toggleSort("ram")}>RAM{arrow("ram")}</th>
-              <th onClick={() => toggleSort("disk")}>Almacenamiento{arrow("disk")}</th>
-              <th className="num" onClick={() => toggleSort("ms")}>Latencia{arrow("ms")}</th>
+              <th onClick={() => toggleSort("disk")}>{t("Almacenamiento")}{arrow("disk")}</th>
+              <th className="num" onClick={() => toggleSort("ms")}>{t("Latencia")}{arrow("ms")}</th>
             </tr>
           </thead>
           <tbody>
@@ -741,7 +761,7 @@ export default function App() {
                 <td className="c-chk" onClick={(e) => e.stopPropagation()}>
                   <input
                     type="checkbox"
-                    aria-label={`Seleccionar ${h.name || h.ip}`}
+                    aria-label={`${t("Seleccionar")} ${h.name || h.ip}`}
                     checked={marked.has(h.ip)}
                     onClick={(e) => {
                       shiftHeld.current = e.shiftKey;
@@ -756,14 +776,14 @@ export default function App() {
                 <td className="c-state">
                   <span
                     className={`dot ${h.alive ? "on" : "arp"}`}
-                    title={h.alive ? "Responde a ping" : "Solo en tabla ARP (no responde a ping)"}
+                    title={h.alive ? t("Responde a ping") : t("Solo en tabla ARP (no responde a ping)")}
                   />
                 </td>
-                <td onDoubleClick={() => h.name && copy(h.name, "Nombre")}>
+                <td onDoubleClick={() => h.name && copy(h.name, t("Nombre"))}>
                   <DeviceIcon kind={deviceKind(h, infos.get(h.ip)?.info)} />
                   {h.name || <span className="muted">—</span>}
                   {prevScan && !prevSet.has(h.ip) && (
-                    <span className="badge-nuevo" title="No estaba en el escaneo anterior">Nuevo</span>
+                    <span className="badge-nuevo" title={t("No estaba en el escaneo anterior")}>{t("Nuevo")}</span>
                   )}
                   <AlertIcon info={infos.get(h.ip)?.info} />
                 </td>
@@ -772,7 +792,7 @@ export default function App() {
                   {h.mac || <span className="muted">—</span>}
                 </td>
                 <td className="user" title={userOfHost(h)}>{infoCell(h, userOfHost(h) || null)}</td>
-                <td className="os" title={osOf(h)}>{infoCell(h, osOf(h) || null, "Sin acceso")}</td>
+                <td className="os" title={osOf(h)}>{infoCell(h, osOf(h) || null, t("Sin acceso"))}</td>
                 <td className="num">
                   {infoCell(h, ramOf(h) ? fmtRam(ramOf(h)) : null)}
                 </td>
@@ -786,11 +806,11 @@ export default function App() {
           <div className="empty">
             {scanning ? (
               <>
-                <span className="spinner" /> Buscando equipos…
+                <span className="spinner" /> {t("Buscando equipos…")}
               </>
             ) : hosts.size ? (
               <>
-                Ningún equipo coincide con el filtro.{" "}
+                {t("Ningún equipo coincide con el filtro.")}{" "}
                 <button
                   className="btn"
                   onClick={() => {
@@ -799,11 +819,11 @@ export default function App() {
                     setKindFilter("all");
                   }}
                 >
-                  Quitar filtros
+                  {t("Quitar filtros")}
                 </button>
               </>
             ) : (
-              "Pulsa «Escanear» (o F5) para descubrir los equipos de la red."
+              t("Pulsa «Escanear» (o F5) para descubrir los equipos de la red.")
             )}
           </div>
         )}
@@ -816,59 +836,59 @@ export default function App() {
               <h2>{sel.name || sel.ip}</h2>
               <span className="muted mono">{sel.ip}</span>
             </div>
-            <button className="btn" onClick={() => setSelected(null)} title="Cerrar">✕</button>
+            <button className="btn" onClick={() => setSelected(null)} title={t("Cerrar")}>✕</button>
           </div>
           <dl>
             <dt>MAC</dt>
             <dd className="mono">{sel.mac || "—"}</dd>
-            <dt>Latencia</dt>
+            <dt>{t("Latencia")}</dt>
             <dd>{sel.ms != null ? `${sel.ms} ms` : "—"}</dd>
-            <dt>Estado</dt>
-            <dd>{sel.alive ? "Responde a ping" : "Solo en tabla ARP"}</dd>
+            <dt>{t("Estado")}</dt>
+            <dd>{sel.alive ? t("Responde a ping") : t("Solo en tabla ARP")}</dd>
           </dl>
 
           <div className="d-sec">
-            <h3>Equipo</h3>
+            <h3>{t("Equipo")}</h3>
             <div className="d-actions">
-              <button className="btn" disabled={!info} onClick={() => info && copy(ficha(sel, info), "Ficha")} title="Copiar ficha del equipo">⧉</button>
-              <button className="btn" disabled={ds?.loading} onClick={() => loadInfo(sel, false)} title="Volver a consultar">↻</button>
-              <button className="btn" disabled={!remote.rdp} onClick={() => openRemote("rdp", sel)} title="Escritorio remoto (RDP)">RDP</button>
-              <button className="btn" disabled={!remote.dameware} onClick={() => openRemote("dameware", sel)} title={remote.dameware ? "DameWare" : "DameWare no está instalado"}>DameWare</button>
+              <button className="btn" disabled={!info} onClick={() => info && copy(ficha(sel, info), t("Ficha"))} title={t("Copiar ficha del equipo")}>⧉</button>
+              <button className="btn" disabled={ds?.loading} onClick={() => loadInfo(sel, false)} title={t("Volver a consultar")}>↻</button>
+              <button className="btn" disabled={!remote.rdp} onClick={() => openRemote("rdp", sel)} title={t("Escritorio remoto (RDP)")}>RDP</button>
+              <button className="btn" disabled={!remote.dameware} onClick={() => openRemote("dameware", sel)} title={remote.dameware ? "DameWare" : t("DameWare no está instalado")}>DameWare</button>
             </div>
           </div>
-          {ds?.loading && <p className="muted">Consultando…</p>}
+          {ds?.loading && <p className="muted">{t("Consultando…")}</p>}
           {ds?.error && <p className="err">{ds.error}</p>}
           {info && (
             <>
               <dl>
-                {row("Sistema", info.os && `${info.os}${info.arch ? ` (${info.arch})` : ""}`)}
-                {row("Versión", info.version && `${info.version}${info.build ? ` · build ${info.build}` : ""}`)}
-                {row("Modelo", [info.manufacturer, info.model].filter(Boolean).join(" "))}
-                {row("Nº serie", info.serial)}
-                {row("CPU", info.cpu && `${info.cpu}${info.cores ? ` · ${info.cores} núcleos / ${info.threads ?? "?"} hilos` : ""}`)}
-                {row("Último usuario", userOf(info))}
-                {row("Dominio", info.domain)}
-                {row("Encendido", info.uptime_s != null ? `hace ${fmtUptime(info.uptime_s)}` : null)}
+                {row(t("Sistema"), info.os && `${info.os}${info.arch ? ` (${info.arch})` : ""}`)}
+                {row(t("Versión"), info.version && `${info.version}${info.build ? ` · build ${info.build}` : ""}`)}
+                {row(t("Modelo"), [info.manufacturer, info.model].filter(Boolean).join(" "))}
+                {row(t("Nº serie"), info.serial)}
+                {row("CPU", info.cpu && `${info.cpu}${info.cores ? ` · ${t("{c} núcleos / {h} hilos", { c: info.cores, h: info.threads ?? "?" })}` : ""}`)}
+                {row(t("Último usuario"), userOf(info))}
+                {row(t("Dominio"), info.domain)}
+                {row(t("Encendido"), info.uptime_s != null ? t("hace {t}", { t: fmtUptime(info.uptime_s) }) : null)}
               </dl>
 
               {info.ram_total
                 ? meter(
-                    "Memoria RAM",
+                    t("Memoria RAM"),
                     Math.round(((info.ram_total - (info.ram_free ?? 0)) / info.ram_total) * 100),
-                    `${fmtBytes(info.ram_free ?? 0)} libres de ${fmtBytes(info.ram_total)}`
+                    t("{free} libres de {total}", { free: fmtBytes(info.ram_free ?? 0), total: fmtBytes(info.ram_total) })
                   )
                 : null}
-              {info.cpu_load != null && meter("Uso de CPU", Math.round(info.cpu_load), "Carga en este momento")}
+              {info.cpu_load != null && meter(t("Uso de CPU"), Math.round(info.cpu_load), t("Carga en este momento"))}
 
               <div className="d-sec">
-                <h3>Discos duros</h3>
+                <h3>{t("Discos duros")}</h3>
               </div>
-              {info.disks.length === 0 && <p className="muted">Sin discos fijos.</p>}
+              {info.disks.length === 0 && <p className="muted">{t("Sin discos fijos.")}</p>}
               {info.disks.map((d) => {
                 const p = d.total ? Math.round(((d.total - d.free) / d.total) * 100) : 0;
                 return (
                   <div key={d.letter}>
-                    {meter(`${d.letter} ${d.label}`.trim(), p, `${fmtBytes(d.free)} libres de ${fmtBytes(d.total)}`)}
+                    {meter(`${d.letter} ${d.label}`.trim(), p, t("{free} libres de {total}", { free: fmtBytes(d.free), total: fmtBytes(d.total) }))}
                   </div>
                 );
               })}
@@ -876,12 +896,12 @@ export default function App() {
           )}
 
           <details className="cred">
-            <summary>Usar otras credenciales</summary>
-            <p className="muted small">Por defecto se usa tu usuario de Windows (necesita ser administrador del equipo).</p>
-            <input placeholder="DOMINIO\usuario" value={cred.user} onChange={(e) => setCred({ ...cred, user: e.target.value })} />
-            <input type="password" placeholder="Contraseña" value={cred.pass} onChange={(e) => setCred({ ...cred, pass: e.target.value })} />
+            <summary>{t("Usar otras credenciales")}</summary>
+            <p className="muted small">{t("Por defecto se usa tu usuario de Windows (necesita ser administrador del equipo).")}</p>
+            <input placeholder={t("DOMINIO\\usuario")} value={cred.user} onChange={(e) => setCred({ ...cred, user: e.target.value })} />
+            <input type="password" placeholder={t("Contraseña")} value={cred.pass} onChange={(e) => setCred({ ...cred, pass: e.target.value })} />
             <button className="btn" disabled={!cred.user.trim() || ds?.loading} onClick={() => loadInfo(sel, true)}>
-              Consultar con estas credenciales
+              {t("Consultar con estas credenciales")}
             </button>
           </details>
         </aside>
@@ -906,13 +926,13 @@ export default function App() {
             }}
           >
             {[
-              ["Copiar IP", menu.h.ip, "IP"],
-              ["Copiar nombre", menu.h.name, "Nombre"],
-              ["Copiar MAC", menu.h.mac, "MAC"],
+              [t("Copiar IP"), menu.h.ip, "IP"],
+              [t("Copiar nombre"), menu.h.name, t("Nombre")],
+              [t("Copiar MAC"), menu.h.mac, "MAC"],
               [
-                "Copiar fila",
+                t("Copiar fila"),
                 [menu.h.name, menu.h.ip, menu.h.mac, osOf(menu.h), ramOf(menu.h) ? fmtRam(ramOf(menu.h)) : "", diskText(infos.get(menu.h.ip)?.info)].join("\t"),
-                "Fila",
+                t("Fila"),
               ],
             ].map(([label, text, what]) => (
               <li
@@ -927,20 +947,19 @@ export default function App() {
               </li>
             ))}
             <li className="sep" />
-            <li className="sep" />
             {(
               [
-                ["rdp", "Escritorio remoto (RDP)", !!remote.rdp],
+                ["rdp", t("Escritorio remoto (RDP)"), !!remote.rdp],
                 ["dameware", "DameWare", !!remote.dameware],
-                ["web", "Abrir en el navegador", !!remote.rdp],
-                ["share", "Abrir recurso compartido (C$)", !!remote.rdp],
-                ["ping", "Ping continuo", !!remote.rdp],
+                ["web", t("Abrir en el navegador"), !!remote.rdp],
+                ["share", t("Abrir recurso compartido (C$)"), !!remote.rdp],
+                ["ping", t("Ping continuo"), !!remote.rdp],
               ] as [RemoteKind, string, boolean][]
             ).map(([k, label, on]) => (
               <li
                 key={k}
                 className={on ? "" : "off"}
-                title={on ? "" : k === "dameware" ? "DameWare no está instalado (o indica su ruta en Ajustes)" : "Solo disponible en Windows"}
+                title={on ? "" : k === "dameware" ? t("DameWare no está instalado (o indica su ruta en Ajustes)") : t("Solo disponible en Windows")}
                 onClick={() => {
                   const h = menu.h;
                   setMenu(null);
@@ -953,9 +972,9 @@ export default function App() {
             <li className="sep" />
             {(
               [
-                ["reboot", "Reiniciar equipo…"],
-                ["shutdown", "Apagar equipo…"],
-                ["abort", "Cancelar apagado/reinicio"],
+                ["reboot", t("Reiniciar equipo…")],
+                ["shutdown", t("Apagar equipo…")],
+                ["abort", t("Cancelar apagado/reinicio")],
               ] as [RemoteKind, string][]
             ).map(([k, label]) => (
               <li
@@ -979,7 +998,7 @@ export default function App() {
                 loadInfo(h, false);
               }}
             >
-              Ver ficha / actualizar
+              {t("Ver ficha / actualizar")}
             </li>
           </ul>
         </>
@@ -993,7 +1012,7 @@ export default function App() {
           initialCols={reportCols}
           onColsChange={setReportCols}
           onOpenSettings={() => setShowSettings(true)}
-          onSaved={() => notify("Informe PDF guardado")}
+          onSaved={() => notify(t("Informe PDF guardado"))}
           onClose={() => setDialog(null)}
         />
       )}
@@ -1008,7 +1027,7 @@ export default function App() {
           value={settings}
           onSave={(s) => {
             setSettings(s);
-            notify("Ajustes guardados");
+            notify(t("Ajustes guardados"));
           }}
           onOpenLog={() => {
             setShowSettings(false);
@@ -1021,25 +1040,25 @@ export default function App() {
       {toast && <div className="toast" role="status">{toast}</div>}
 
       <footer className="status">
-        <span>{hosts.size} equipos{rows.length !== hosts.size && ` (${rows.length} mostrados)`}</span>
+        <span>{tn(hosts.size, "{n} equipo", "{n} equipos")}{rows.length !== hosts.size && ` (${t("{n} mostrados", { n: rows.length })})`}</span>
         {scanning && <span>{progress.done}/{progress.total} · {pct}%</span>}
         {!scanning && autoCheck && alive.length > 0 && checked < alive.length && (
-          <span title="Consultando cada equipo: sistema operativo, RAM, discos y último usuario">Leyendo SO, RAM, discos y usuario: {checked} de {alive.length}…</span>
+          <span title={t("Consultando cada equipo: sistema operativo, RAM, discos y último usuario")}>{t("Leyendo SO, RAM, discos y usuario: {a} de {b}…", { a: checked, b: alive.length })}</span>
         )}
         {prevScan && newCount > 0 && (
-          <span className="info" title={`Respecto al escaneo del ${new Date(prevScan.at).toLocaleString("es-ES")}`}>
-            ★ {newCount} nuevo{newCount > 1 ? "s" : ""}
+          <span className="info" title={t("Respecto al escaneo del {d}", { d: new Date(prevScan.at).toLocaleString(locale()) })}>
+            ★ {tn(newCount, "{n} nuevo", "{n} nuevos")}
           </span>
         )}
         {prevScan && !scanning && gone.length > 0 && (
-          <span className="muted" title={`No aparecen ahora:\n${gone.join("\n")}`}>
-            {gone.length} ya no aparece{gone.length > 1 ? "n" : ""}
+          <span className="muted" title={`${t("No aparecen ahora:")}\n${gone.join("\n")}`}>
+            {tn(gone.length, "{n} ya no aparece", "{n} ya no aparecen")}
           </span>
         )}
-        {alertCount > 0 && <span className="err">⚠ {alertCount} con discos casi llenos</span>}
-        <span className="muted push">{msg || "Clic derecho: más acciones · ↑↓ navegar · Ctrl+F filtrar · F5 escanear · Esc cerrar"}</span>
-        <button className="linkbtn" title="Ver el registro de errores" onClick={() => setDialog("log")}>Registro</button>
-        <button className="linkbtn" title="Ver novedades" onClick={() => setDialog("news")}>v{__APP_VERSION__}</button>
+        {alertCount > 0 && <span className="err">⚠ {t("{n} con discos casi llenos", { n: alertCount })}</span>}
+        <span className="muted push">{msg || t("Clic derecho: más acciones · ↑↓ navegar · Ctrl+F filtrar · F5 escanear · Esc cerrar")}</span>
+        <button className="linkbtn" title={t("Ver el registro de errores")} onClick={() => setDialog("log")}>{t("Registro")}</button>
+        <button className="linkbtn" title={t("Ver novedades")} onClick={() => setDialog("news")}>v{__APP_VERSION__}</button>
       </footer>
     </div>
   );
