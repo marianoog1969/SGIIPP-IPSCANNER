@@ -96,6 +96,8 @@ export const SECTIONS_ES: Section[] = [
           "**Solo con alertas:** muestra únicamente los equipos con algún disco en rojo.",
           "**Copiar:** doble clic en una celda copia su valor; el botón **Copiar** copia todo el listado visible (se pega bien en Excel).",
           "**Clic derecho** sobre una fila: copiar IP, nombre, MAC o la fila completa, y ver o actualizar la ficha.",
+          "**Columnas (▦):** muestra u oculta columnas, cámbialas de orden con ▲▼ y arrastra el borde derecho de un título para ensanchar. Se recuerda entre sesiones; «Restablecer columnas» vuelve a lo normal.",
+          "**Resumen clicable:** bajo la barra aparecen avisos (discos críticos, equipos nuevos, sin acceso); pulsa uno para ver solo esos equipos y otra vez para quitarlo.",
           "**↻ Recomprobar:** vuelve a consultar sistema, RAM y discos de todos los equipos sin repetir el escaneo.",
         ],
       },
@@ -144,6 +146,7 @@ export const SECTIONS_ES: Section[] = [
           "**Equipo:** sistema operativo y versión, modelo, nº de serie, procesador, usuario conectado, dominio y tiempo encendido.",
           "**Memoria RAM y CPU:** barras de uso en el momento de la consulta (la CPU es una lectura instantánea).",
           "**Discos duros:** una barra por unidad con su porcentaje y el espacio libre.",
+          "**Notas:** ubicación (planta, despacho…) y una nota libre por equipo. Se guardan en `notas.json` asociadas a la MAC, así que siguen al equipo aunque cambie de IP. En Ajustes puedes indicar una carpeta compartida para usarlas desde varios puestos. Se pueden mostrar como columna «Ubicación y nota», buscar en el filtro e incluir en los informes PDF.",
         ],
       },
       {
@@ -228,7 +231,7 @@ export const SECTIONS_ES: Section[] = [
     blocks: [
       {
         t: "p",
-        x: "Marca varios equipos con las casillas de la izquierda (la de la cabecera marca todos los **visibles**, así que combínala con los filtros de texto o de tipo). También puedes usar `Ctrl`+clic para marcar uno y `Mayús`+clic para marcar un rango. `Esc` quita la selección.",
+        x: "Marca varios equipos con las casillas de la izquierda (la de la cabecera marca todos los **visibles**, así que combínala con los filtros de texto o de tipo). También puedes usar `Ctrl`+clic para marcar uno y `Mayús`+clic para marcar un rango. `Esc` quita la selección. La barra de selección tiene **Marcar visibles** (`Ctrl+A`) e **Invertir** (`Ctrl+I`) sobre los equipos que se ven.",
       },
       {
         t: "p",

@@ -148,6 +148,7 @@ export function generateReport(o: ReportOptions): Uint8Array {
   const baseTable = (extra: UserOptions): UserOptions => ({
     margin: { top: MT, left: ML, right: MR, bottom: MB },
     theme: "grid",
+    rowPageBreak: "avoid",
     styles: {
       font: "helvetica",
       fontSize: 8,
@@ -186,6 +187,7 @@ export function generateReport(o: ReportOptions): Uint8Array {
         if (d.section !== "body") return;
         const key = keyAt(d.column.index);
         const r = rowData[d.row.index];
+        if (!r) return;
         if (key === "estado") {
           d.cell.styles.cellPadding = { top: 4, bottom: 4, left: 16, right: 5 };
         } else if (key === "disco") {
@@ -203,6 +205,7 @@ export function generateReport(o: ReportOptions): Uint8Array {
         if (d.section !== "body") return;
         const key = keyAt(d.column.index);
         const r = rowData[d.row.index];
+        if (!r) return;
         let c: RGB | null = null;
         if (key === "estado") c = r.h.alive ? VERDE : AMBAR;
         else if (key === "disco") {
@@ -279,7 +282,9 @@ export function generateReport(o: ReportOptions): Uint8Array {
       },
       didDrawCell: (d) => {
         if (d.section === "body" && d.column.index === 6) {
-          const p = diskPct(discos[d.row.index].d);
+          const dk = discos[d.row.index];
+          if (!dk) return;
+          const p = diskPct(dk.d);
           fill(doc, lightColor(p));
           doc.circle(d.cell.x + 9, d.cell.y + d.cell.height / 2, 3.2, "F");
         }

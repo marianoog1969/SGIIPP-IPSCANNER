@@ -83,6 +83,8 @@ export const SECTIONS_EN: Section[] = [
           "**Only with alerts:** shows only devices with a disk in red.",
           "**Copy:** double-click a cell to copy its value; the **Copy** button copies the whole visible list (it pastes well into Excel).",
           "**Right-click** a row: copy IP, name, MAC or the whole row, and view or refresh the detail panel.",
+          "**Columns (▦):** show or hide columns, reorder them with ▲▼ and drag the right edge of a title to resize. It is remembered between sessions; «Reset columns» restores the default.",
+          "**Clickable summary:** alerts appear under the bar (critical disks, new devices, no access); click one to see only those devices and click again to clear it.",
           "**↻ Recheck:** queries system, RAM and disks of all devices again without repeating the scan.",
         ],
       },
@@ -131,6 +133,7 @@ export const SECTIONS_EN: Section[] = [
           "**Device:** operating system and version, model, serial number, processor, logged-on user, domain and uptime.",
           "**RAM and CPU:** usage bars at the time of the query (CPU is an instantaneous reading).",
           "**Hard disks:** one bar per drive with its percentage and free space.",
+          "**Notes:** location (floor, office…) and a free note per device. They are saved in `notas.json` tied to the MAC, so they follow the device even if its IP changes. In Settings you can set a shared folder to use them from several workstations. They can be shown as a «Location and note» column, searched in the filter and included in the PDF reports.",
         ],
       },
       {
@@ -215,7 +218,7 @@ export const SECTIONS_EN: Section[] = [
     blocks: [
       {
         t: "p",
-        x: "Tick several devices with the checkboxes on the left (the header one ticks all **visible** devices, so combine it with the text or type filters). You can also use `Ctrl`+click to tick one and `Shift`+click to tick a range. `Esc` clears the selection.",
+        x: "Tick several devices with the checkboxes on the left (the header one ticks all **visible** devices, so combine it with the text or type filters). You can also use `Ctrl`+click to tick one and `Shift`+click to tick a range. `Esc` clears the selection. The selection bar has **Select visible** (`Ctrl+A`) and **Invert** (`Ctrl+I`) over the devices you can see.",
       },
       {
         t: "p",

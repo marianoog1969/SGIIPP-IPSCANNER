@@ -1,4 +1,5 @@
 import { t } from "./i18n";
+import { getNote } from "./notes";
 import { Host, Info, kindLabel, deviceKind, userOf, diskText, fmtRam, fmtUptime, shortOs } from "./lib";
 
 export interface Row {
@@ -46,6 +47,8 @@ export const COLS: Col[] = [
     group: "ficha",
     get: (r) => [r.info?.manufacturer, r.info?.model].filter(Boolean).join(" ") || dash,
   },
+  { key: "ubic", label: "Ubicación", group: "ficha", get: (r) => getNote(r.h)?.ubic || dash },
+  { key: "nota", label: "Nota", group: "ficha", get: (r) => getNote(r.h)?.nota || dash },
   { key: "serie", label: "Nº de serie", group: "ficha", get: (r) => r.info?.serial || dash },
   { key: "cpu", label: "Procesador", group: "ficha", get: (r) => r.info?.cpu || dash },
   { key: "dominio", label: "Dominio", group: "ficha", get: (r) => r.info?.domain || dash },

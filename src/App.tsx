@@ -35,6 +35,7 @@ import AboutDialog from "./AboutDialog";
 import { logEvent } from "./log";
 import { t, tn, setLang, initialLang, locale } from "./i18n";
 import DonateButton from "./DonateButton";
+import { loadNotes, setNote, getNote, noteText } from "./notes";
 import SettingsDialog, { DEFAULT_SETTINGS, Settings } from "./SettingsDialog";
 
 function AlertIcon({ info }: { info?: Info }) {
@@ -57,6 +58,8 @@ interface Prefs {
   autoCheck?: boolean;
   onlyAlerts?: boolean;
   kindFilter?: string;
+  tcols?: string[];
+  twidth?: Record<string, number>;
   hideNews?: boolean;
   sort?: { key: SortKey; asc: boolean };
   settings?: Settings;
@@ -83,6 +86,9 @@ const loadLast = (): LastScan | null => {
     return null;
   }
 };
+
+const TCOL_KEYS = ["name", "ip", "mac", "user", "os", "ram", "disk", "ms", "note"];
+const DEFAULT_TCOLS = ["name", "ip", "mac", "user", "os", "ram", "disk", "ms"];
 
 export default function App() {
   const prefs = useRef<Prefs>(loadPrefs()).current;
@@ -114,6 +120,13 @@ export default function App() {
   const [toast, setToast] = useState("");
   const toastTimer = useRef<number | undefined>(undefined);
   const [marked, setMarked] = useState<Set<string>>(new Set());
+  const [quick, setQuick] = useState<"" | "new" | "noaccess">("");
+  const [tcols, setTcols] = useState<string[]>(prefs.tcols ?? DEFAULT_TCOLS);
+  const [twidth, setTwidth] = useState<Record<string, number>>(prefs.twidth ?? {});
+  const [colMenu, setColMenu] = useState<null | { top: number; left: number }>(null);
+  const [notesVer, setNotesVer] = useState(0);
+  const [notesLoads, setNotesLoads] = useState(0);
+  const resized = useRef(false);
   const lastChecked = useRef<string | null>(null);
   const shiftHeld = useRef(false);
   const [menu, setMenu] = useState<{ x: number; y: number; h: Host } | null>(null);
@@ -121,11 +134,11 @@ export default function App() {
 
   useEffect(() => {
     try {
-      localStorage.setItem(PREFS, JSON.stringify({ range, autoCheck, onlyAlerts, kindFilter, hideNews, sort, settings, reportCols }));
+      localStorage.setItem(PREFS, JSON.stringify({ range, autoCheck, onlyAlerts, kindFilter, hideNews, sort, settings, reportCols, tcols, twidth }));
     } catch {
       /* sin almacenamiento: no pasa nada */
     }
-  }, [range, autoCheck, onlyAlerts, kindFilter, hideNews, sort, settings, reportCols]);
+  }, [range, autoCheck, onlyAlerts, kindFilter, hideNews, sort, settings, reportCols, tcols, twidth]);
 
   // El texto de estado del pie queda en el idioma antiguo: se limpia al cambiar de idioma
   useEffect(() => {
@@ -268,6 +281,13 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hosts, infos]);
 
+  useEffect(() => {
+    loadNotes(settings.notesDir).then(() => {
+      setNotesVer((v) => v + 1);
+      setNotesLoads((v) => v + 1);
+    });
+  }, [settings.notesDir]);
+
   const rows = useMemo(() => {
     const f = filter.trim().toLowerCase();
     let list = [...hosts.values()];
@@ -277,9 +297,11 @@ export default function App() {
         return i ? diskAlerts(i).length > 0 : false;
       });
     if (kindFilter !== "all") list = list.filter((h) => groupOf(h) === kindFilter);
+    if (quick === "new") list = list.filter((h) => prevScan && !prevSet.has(h.ip));
+    if (quick === "noaccess") list = list.filter((h) => !!infos.get(h.ip)?.error);
     if (f)
       list = list.filter((h) =>
-        `${h.name} ${h.ip} ${h.mac} ${userOfHost(h)} ${infos.get(h.ip)?.info?.last_user ?? ""} ${infos.get(h.ip)?.info?.user ?? ""}`.toLowerCase().includes(f)
+        `${h.name} ${h.ip} ${h.mac} ${userOfHost(h)} ${infos.get(h.ip)?.info?.last_user ?? ""} ${infos.get(h.ip)?.info?.user ?? ""} ${noteText(h)}`.toLowerCase().includes(f)
       );
     const dir = sort.asc ? 1 : -1;
     list.sort((a, b) => {
@@ -301,7 +323,7 @@ export default function App() {
       }
     });
     return list;
-  }, [hosts, filter, sort, onlyAlerts, kindFilter, infos]);
+  }, [hosts, filter, sort, onlyAlerts, kindFilter, infos, quick, prevScan, prevSet, notesVer]);
 
   // Atajos de teclado
   useEffect(() => {
@@ -327,6 +349,16 @@ export default function App() {
         return;
       }
       if (dialog || showSettings) return;
+      if (ctrl && !typing && e.key.toLowerCase() === "a") {
+        e.preventDefault();
+        markVisible();
+        return;
+      }
+      if (ctrl && !typing && e.key.toLowerCase() === "i") {
+        e.preventDefault();
+        invertMarked();
+        return;
+      }
       if (ctrl && e.key.toLowerCase() === "f") {
         e.preventDefault();
         filterRef.current?.focus();
@@ -434,6 +466,22 @@ export default function App() {
   };
 
   const ownIps = useMemo(() => new Set(networks.map((n) => n.ip)), [networks]);
+  const saveNote = (h: Host, patch: { ubic?: string; nota?: string }) => {
+    const cur = getNote(h) ?? { nota: "", ubic: "" };
+    const next = { ...cur, ...patch };
+    if (next.nota.trim() === cur.nota && next.ubic.trim() === cur.ubic) return;
+    setNote(h, next, settings.notesDir, (m) => setError(m));
+    setNotesVer((v) => v + 1);
+  };
+
+  const markVisible = () => setMarked((p) => new Set([...p, ...rows.map((h) => h.ip)]));
+  const invertMarked = () =>
+    setMarked((p) => {
+      const n = new Set(p);
+      rows.forEach((h) => (n.has(h.ip) ? n.delete(h.ip) : n.add(h.ip)));
+      return n;
+    });
+
   const toggleCheck = (ip: string, on?: boolean) =>
     setMarked((p) => {
       const n = new Set(p);
@@ -545,7 +593,78 @@ export default function App() {
     </div>
   );
 
+  type TCol = { key: string; label: string; sort?: SortKey; num?: boolean; td: (h: Host) => JSX.Element };
+  const TCOLS: TCol[] = [
+    {
+      key: "name",
+      label: t("Nombre del equipo"),
+      sort: "name",
+      td: (h) => (
+        <td key="name" onDoubleClick={() => h.name && copy(h.name, t("Nombre"))}>
+          <DeviceIcon kind={deviceKind(h, infos.get(h.ip)?.info)} />
+          {h.name || <span className="muted">—</span>}
+          {prevScan && !prevSet.has(h.ip) && (
+            <span className="badge-nuevo" title={t("No estaba en el escaneo anterior")}>{t("Nuevo")}</span>
+          )}
+          <AlertIcon info={infos.get(h.ip)?.info} />
+        </td>
+      ),
+    },
+    { key: "ip", label: t("Dirección IP"), sort: "ip", td: (h) => <td key="ip" className="mono" onDoubleClick={() => copy(h.ip, "IP")}>{h.ip}</td> },
+    {
+      key: "mac",
+      label: t("Dirección MAC"),
+      sort: "mac",
+      td: (h) => (
+        <td key="mac" className="mono" onDoubleClick={() => h.mac && copy(h.mac, "MAC")}>
+          {h.mac || <span className="muted">—</span>}
+        </td>
+      ),
+    },
+    { key: "user", label: t("Último usuario"), sort: "user", td: (h) => <td key="user" className="user" title={userOfHost(h)}>{infoCell(h, userOfHost(h) || null)}</td> },
+    { key: "os", label: t("Sistema operativo"), sort: "os", td: (h) => <td key="os" className="os" title={osOf(h)}>{infoCell(h, osOf(h) || null, t("Sin acceso"))}</td> },
+    { key: "ram", label: "RAM", sort: "ram", num: true, td: (h) => <td key="ram" className="num">{infoCell(h, ramOf(h) ? fmtRam(ramOf(h)) : null)}</td> },
+    { key: "disk", label: t("Almacenamiento"), sort: "disk", td: (h) => <td key="disk">{diskCell(h)}</td> },
+    { key: "ms", label: t("Latencia"), sort: "ms", num: true, td: (h) => <td key="ms" className="num">{h.ms != null ? `${h.ms} ms` : <span className="muted">—</span>}</td> },
+    {
+      key: "note",
+      label: t("Ubicación y nota"),
+      td: (h) => (
+        <td key="note" className="note" title={noteText(h)}>
+          {noteText(h) || <span className="muted">—</span>}
+        </td>
+      ),
+    },
+  ];
+  const shownCols = tcols.map((k) => TCOLS.find((c) => c.key === k)).filter((c): c is TCol => !!c);
+  const moveCol = (k: string, d: -1 | 1) =>
+    setTcols((cur) => {
+      const i = cur.indexOf(k);
+      const j = i + d;
+      if (i < 0 || j < 0 || j >= cur.length) return cur;
+      const n = [...cur];
+      [n[i], n[j]] = [n[j], n[i]];
+      return n;
+    });
+  const startResize = (k: string, e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const th = (e.currentTarget as HTMLElement).parentElement as HTMLElement;
+    const x0 = e.clientX;
+    const w0 = th.offsetWidth;
+    resized.current = true;
+    const move = (ev: MouseEvent) => setTwidth((w) => ({ ...w, [k]: Math.max(50, w0 + ev.clientX - x0) }));
+    const up = () => {
+      window.removeEventListener("mousemove", move);
+      window.removeEventListener("mouseup", up);
+      setTimeout(() => (resized.current = false), 0);
+    };
+    window.addEventListener("mousemove", move);
+    window.addEventListener("mouseup", up);
+  };
+
   const alive = [...hosts.values()];
+  const noAccessCount = alive.filter((h) => !!infos.get(h.ip)?.error).length;
   const newCount = prevScan ? alive.filter((h) => !prevSet.has(h.ip)).length : 0;
   const gone = prevScan && !scanning ? prevScan.ips.filter((ip) => !hosts.has(ip)) : [];
   const checked = alive.filter((h) => infos.get(h.ip) && !infos.get(h.ip)!.loading).length;
@@ -680,7 +799,73 @@ export default function App() {
         <button className="btn primary" disabled={!hosts.size} onClick={() => setDialog("report")}>
           {t("Informe PDF")}
         </button>
+        <div className="colmenu-wrap">
+          <button
+            className="btn icon"
+            onClick={(e) => {
+              if (colMenu) return setColMenu(null);
+              const b = e.currentTarget.getBoundingClientRect();
+              setColMenu({ top: b.bottom + 6, left: Math.max(8, Math.min(b.right - 270, window.innerWidth - 278)) });
+            }}
+            title={t("Columnas de la tabla")} aria-label={t("Columnas de la tabla")}>▦</button>
+          {colMenu && (
+            <>
+              <div className="colmenu-bg" onClick={() => setColMenu(null)} />
+              <div className="colmenu" role="menu" style={{ top: colMenu.top, left: colMenu.left }}>
+                <b>{t("Columnas de la tabla")}</b>
+                {[...tcols.filter((k) => TCOL_KEYS.includes(k)), ...TCOL_KEYS.filter((k) => !tcols.includes(k))].map((k) => {
+                  const c = TCOLS.find((x) => x.key === k)!;
+                  const on = tcols.includes(k);
+                  return (
+                    <div key={k} className="cm-row">
+                      <label>
+                        <input
+                          type="checkbox"
+                          checked={on}
+                          disabled={on && tcols.length <= 1}
+                          onChange={() => setTcols((cur) => (cur.includes(k) ? cur.filter((x) => x !== k) : [...cur, k]))}
+                        />
+                        {c.label}
+                      </label>
+                      <button className="btn" disabled={!on} onClick={() => moveCol(k, -1)} title={t("Subir")}>▲</button>
+                      <button className="btn" disabled={!on} onClick={() => moveCol(k, 1)} title={t("Bajar")}>▼</button>
+                    </div>
+                  );
+                })}
+                <button
+                  className="btn"
+                  onClick={() => {
+                    setTcols(DEFAULT_TCOLS);
+                    setTwidth({});
+                  }}
+                >
+                  {t("Restablecer columnas")}
+                </button>
+              </div>
+            </>
+          )}
+        </div>
       </div>
+
+      {(alertCount > 0 || (prevScan && newCount > 0) || noAccessCount > 0) && !scanning && (
+        <div className="summary" role="group" aria-label={t("Resumen")}>
+          {alertCount > 0 && (
+            <button className={"chip bad" + (onlyAlerts ? " on" : "")} onClick={() => setOnlyAlerts((v) => !v)} title={t("Mostrar solo estos equipos")}>
+              ⚠ {tn(alertCount, "{n} disco crítico", "{n} discos críticos")}
+            </button>
+          )}
+          {prevScan && newCount > 0 && (
+            <button className={"chip new" + (quick === "new" ? " on" : "")} onClick={() => setQuick((q) => (q === "new" ? "" : "new"))} title={t("Mostrar solo estos equipos")}>
+              ★ {tn(newCount, "{n} equipo nuevo", "{n} equipos nuevos")}
+            </button>
+          )}
+          {noAccessCount > 0 && (
+            <button className={"chip warn" + (quick === "noaccess" ? " on" : "")} onClick={() => setQuick((q) => (q === "noaccess" ? "" : "noaccess"))} title={t("Mostrar solo estos equipos")}>
+              {tn(noAccessCount, "{n} sin acceso", "{n} sin acceso")}
+            </button>
+          )}
+        </div>
+      )}
 
       {scanning && (
         <div className="bar"><div style={{ width: `${pct}%` }} /></div>
@@ -703,6 +888,9 @@ export default function App() {
           >
             {t("Copiar IPs")}
           </button>
+          <span className="sep-v" />
+          <button className="btn" onClick={markVisible} title={t("Marcar todos los equipos visibles (Ctrl+A)")}>{t("Marcar visibles")}</button>
+          <button className="btn" onClick={invertMarked} title={t("Invertir la selección entre los equipos visibles (Ctrl+I)")}>{t("Invertir")}</button>
           <div className="spacer" />
           <button className="btn" onClick={() => setMarked(new Set())} title={t("Quitar la selección (Esc)")}>{t("Limpiar selección")}</button>
         </div>
@@ -728,14 +916,18 @@ export default function App() {
                 />
               </th>
               <th className="c-state" />
-              <th onClick={() => toggleSort("name")}>{t("Nombre del equipo")}{arrow("name")}</th>
-              <th onClick={() => toggleSort("ip")}>{t("Dirección IP")}{arrow("ip")}</th>
-              <th onClick={() => toggleSort("mac")}>{t("Dirección MAC")}{arrow("mac")}</th>
-              <th onClick={() => toggleSort("user")}>{t("Último usuario")}{arrow("user")}</th>
-              <th onClick={() => toggleSort("os")}>{t("Sistema operativo")}{arrow("os")}</th>
-              <th className="num" onClick={() => toggleSort("ram")}>RAM{arrow("ram")}</th>
-              <th onClick={() => toggleSort("disk")}>{t("Almacenamiento")}{arrow("disk")}</th>
-              <th className="num" onClick={() => toggleSort("ms")}>{t("Latencia")}{arrow("ms")}</th>
+              {shownCols.map((c) => (
+                <th
+                  key={c.key}
+                  className={c.num ? "num" : ""}
+                  style={twidth[c.key] ? { width: twidth[c.key], maxWidth: twidth[c.key] } : undefined}
+                  onClick={() => c.sort && !resized.current && toggleSort(c.sort)}
+                >
+                  {c.label}
+                  {c.sort && arrow(c.sort)}
+                  <span className="rz" onMouseDown={(e) => startResize(c.key, e)} onClick={(e) => e.stopPropagation()} />
+                </th>
+              ))}
             </tr>
           </thead>
           <tbody>
@@ -779,25 +971,7 @@ export default function App() {
                     title={h.alive ? t("Responde a ping") : t("Solo en tabla ARP (no responde a ping)")}
                   />
                 </td>
-                <td onDoubleClick={() => h.name && copy(h.name, t("Nombre"))}>
-                  <DeviceIcon kind={deviceKind(h, infos.get(h.ip)?.info)} />
-                  {h.name || <span className="muted">—</span>}
-                  {prevScan && !prevSet.has(h.ip) && (
-                    <span className="badge-nuevo" title={t("No estaba en el escaneo anterior")}>{t("Nuevo")}</span>
-                  )}
-                  <AlertIcon info={infos.get(h.ip)?.info} />
-                </td>
-                <td className="mono" onDoubleClick={() => copy(h.ip, "IP")}>{h.ip}</td>
-                <td className="mono" onDoubleClick={() => h.mac && copy(h.mac, "MAC")}>
-                  {h.mac || <span className="muted">—</span>}
-                </td>
-                <td className="user" title={userOfHost(h)}>{infoCell(h, userOfHost(h) || null)}</td>
-                <td className="os" title={osOf(h)}>{infoCell(h, osOf(h) || null, t("Sin acceso"))}</td>
-                <td className="num">
-                  {infoCell(h, ramOf(h) ? fmtRam(ramOf(h)) : null)}
-                </td>
-                <td>{diskCell(h)}</td>
-                <td className="num">{h.ms != null ? `${h.ms} ms` : <span className="muted">—</span>}</td>
+                {shownCols.map((c) => c.td(h))}
               </tr>
             ))}
           </tbody>
@@ -817,6 +991,7 @@ export default function App() {
                     setFilter("");
                     setOnlyAlerts(false);
                     setKindFilter("all");
+                    setQuick("");
                   }}
                 >
                   {t("Quitar filtros")}
@@ -846,6 +1021,23 @@ export default function App() {
             <dt>{t("Estado")}</dt>
             <dd>{sel.alive ? t("Responde a ping") : t("Solo en tabla ARP")}</dd>
           </dl>
+
+          <div className="d-sec notes" key={`${sel.ip}-${notesLoads}`}>
+            <h3>{t("Notas")}</h3>
+            <input
+              defaultValue={getNote(sel)?.ubic ?? ""}
+              placeholder={t("Ubicación (planta, despacho…)")}
+              onBlur={(e) => saveNote(sel, { ubic: e.target.value })}
+              onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
+            />
+            <textarea
+              rows={3}
+              defaultValue={getNote(sel)?.nota ?? ""}
+              placeholder={t("Nota sobre el equipo")}
+              onBlur={(e) => saveNote(sel, { nota: e.target.value })}
+            />
+            {!sel.mac && <p className="muted small">{t("Sin MAC: la nota se asocia a la IP.")}</p>}
+          </div>
 
           <div className="d-sec">
             <h3>{t("Equipo")}</h3>

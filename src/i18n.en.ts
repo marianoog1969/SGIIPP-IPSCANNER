@@ -321,6 +321,33 @@ const EN: Record<string, string> = {
   "Ver registro de errores": "View error log",
   "Restablecer": "Reset",
   "Guardar": "Save",
+  // v2.4.0
+  "Ubicación": "Location",
+  "Nota": "Note",
+  "Notas": "Notes",
+  "Ubicación y nota": "Location and note",
+  "Ubicación (planta, despacho…)": "Location (floor, office…)",
+  "Nota sobre el equipo": "Note about the device",
+  "Sin MAC: la nota se asocia a la IP.": "No MAC: the note is tied to the IP.",
+  "Notas y ubicación de los equipos. Se guardan en un fichero notas.json; indica una carpeta compartida para usarlas desde varios puestos.":
+    "Device notes and locations. They are saved in a notas.json file; set a shared folder to use them from several workstations.",
+  "Carpeta de las notas (opcional)": "Notes folder (optional)",
+  "Por defecto: carpeta de datos del programa": "Default: the program's data folder",
+  "Columnas de la tabla": "Table columns",
+  "Subir": "Move up",
+  "Bajar": "Move down",
+  "Restablecer columnas": "Reset columns",
+  "Resumen": "Summary",
+  "Mostrar solo estos equipos": "Show only these devices",
+  "{n} disco crítico": "{n} critical disk",
+  "{n} discos críticos": "{n} critical disks",
+  "{n} equipo nuevo": "{n} new device",
+  "{n} equipos nuevos": "{n} new devices",
+  "{n} sin acceso": "{n} without access",
+  "Marcar visibles": "Select visible",
+  "Marcar todos los equipos visibles (Ctrl+A)": "Select all visible devices (Ctrl+A)",
+  "Invertir": "Invert",
+  "Invertir la selección entre los equipos visibles (Ctrl+I)": "Invert the selection among visible devices (Ctrl+I)",
 };
 
 export default EN;

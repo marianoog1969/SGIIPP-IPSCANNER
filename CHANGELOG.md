@@ -14,6 +14,15 @@ npm run version:minor    # novedades
 npm run version:major    # cambio mayor
 ```
 
+## 2.4.1
+- Corregido: el informe PDF fallaba («Cannot read properties of undefined») al incluir columnas largas como Modelo o Procesador.
+
+## 2.4.0
+- Nuevo: **notas y ubicación** por equipo (en la ficha), guardadas por MAC en `notas.json`; carpeta configurable en Ajustes para compartirlas. Se pueden mostrar como columna, buscar y llevar a los informes PDF.
+- Nuevo: **columnas de la tabla configurables** (mostrar, ocultar, ordenar y ensanchar).
+- Nuevo: **resumen clicable** bajo la barra: discos críticos, equipos nuevos y sin acceso.
+- Nuevo: **Marcar visibles** e **Invertir** en la barra de selección (`Ctrl+A` / `Ctrl+I`).
+
 ## 2.3.1
 - Botón **Donar** (PayPal) activado en la barra y en «Acerca de».
 

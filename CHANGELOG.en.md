@@ -1,5 +1,14 @@
 # SGIIPP-IPSCANER · Version history
 
+## 2.4.1
+- Fixed: the PDF report failed («Cannot read properties of undefined») when including long columns such as Model or Processor.
+
+## 2.4.0
+- New: per-device **notes and location** (in the detail panel), stored by MAC in `notas.json`; folder configurable in Settings to share them. Can be shown as a column, searched and included in PDF reports.
+- New: **configurable table columns** (show, hide, reorder and resize).
+- New: **clickable summary** under the bar: critical disks, new devices and no access.
+- New: **Select visible** and **Invert** in the selection bar (`Ctrl+A` / `Ctrl+I`).
+
 ## 2.3.1
 - **Donate** (PayPal) button enabled on the toolbar and in «About».
 

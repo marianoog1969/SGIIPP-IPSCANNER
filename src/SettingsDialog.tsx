@@ -11,6 +11,7 @@ export interface Settings {
   damewareAuth: string;
   damewareArgs: string;
   lang: Lang;
+  notesDir: string;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -23,6 +24,7 @@ export const DEFAULT_SETTINGS: Settings = {
   damewareAuth: "1",
   damewareArgs: "",
   lang: "es",
+  notesDir: "",
 };
 
 export default function SettingsDialog({
@@ -37,7 +39,7 @@ export default function SettingsDialog({
   onOpenLog?: () => void;
 }) {
   const [s, setS] = useState(value);
-  const set = (k: "centro" | "localidad" | "organismo" | "dameware" | "damewareArgs") => (e: React.ChangeEvent<HTMLInputElement>) =>
+  const set = (k: "centro" | "localidad" | "organismo" | "dameware" | "damewareArgs" | "notesDir") => (e: React.ChangeEvent<HTMLInputElement>) =>
     setS({ ...s, [k]: e.target.value });
   const num = (k: "hilos" | "consultas", min: number, max: number) => (e: React.ChangeEvent<HTMLInputElement>) =>
     setS({ ...s, [k]: Math.min(max, Math.max(min, Math.round(Number(e.target.value)) || min)) });
@@ -108,6 +110,13 @@ export default function SettingsDialog({
             <input value={s.damewareArgs} onChange={set("damewareArgs")} placeholder={t("Ej.: -x:")} />
           </label>
           <p className="muted small" style={{ marginTop: 14 }}>
+            {t("Notas y ubicación de los equipos. Se guardan en un fichero notas.json; indica una carpeta compartida para usarlas desde varios puestos.")}
+          </p>
+          <label className="field">
+            <span>{t("Carpeta de las notas (opcional)")}</span>
+            <input value={s.notesDir} onChange={set("notesDir")} placeholder={t("Por defecto: carpeta de datos del programa")} />
+          </label>
+          <p className="muted small" style={{ marginTop: 14 }}>
             {t("Registro de errores. Si el programa falla o se cierra, queda escrito en un archivo de registro.")}
           </p>
           <button className="btn" onClick={onOpenLog}>{t("Ver registro de errores")}</button>
@@ -120,7 +129,7 @@ export default function SettingsDialog({
             className="btn primary"
             disabled={!s.centro.trim()}
             onClick={() => {
-              onSave({ ...s, dameware: s.dameware.trim(), damewareArgs: s.damewareArgs.trim(), centro: s.centro.trim(), localidad: s.localidad.trim(), organismo: s.organismo.trim() });
+              onSave({ ...s, dameware: s.dameware.trim(), notesDir: s.notesDir.trim(), damewareArgs: s.damewareArgs.trim(), centro: s.centro.trim(), localidad: s.localidad.trim(), organismo: s.organismo.trim() });
               onClose();
             }}
           >

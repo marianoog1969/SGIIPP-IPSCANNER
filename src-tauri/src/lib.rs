@@ -273,6 +273,42 @@ fn log_info(state: State<'_, LogState>) -> LogInfo {
     }
 }
 
+fn notes_file(dir: &str) -> std::path::PathBuf {
+    let d = dir.trim();
+    if d.is_empty() {
+        logger::dir()
+            .parent()
+            .map(|p| p.to_path_buf())
+            .unwrap_or_else(logger::dir)
+            .join("notas.json")
+    } else {
+        std::path::PathBuf::from(d).join("notas.json")
+    }
+}
+
+/// Lee las notas de los equipos (JSON). Si no existe el fichero, devuelve "{}".
+#[tauri::command]
+fn notes_load(dir: String) -> Result<String, String> {
+    let f = notes_file(&dir);
+    match std::fs::read_to_string(&f) {
+        Ok(s) => Ok(s),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok("{}".into()),
+        Err(e) => Err(format!("No se pudieron leer las notas ({}): {e}", f.display())),
+    }
+}
+
+/// Guarda las notas (escritura atómica: fichero temporal + renombrado).
+#[tauri::command]
+fn notes_save(dir: String, json: String) -> Result<(), String> {
+    let f = notes_file(&dir);
+    if let Some(p) = f.parent() {
+        let _ = std::fs::create_dir_all(p);
+    }
+    let tmp = f.with_extension("json.tmp");
+    std::fs::write(&tmp, json).map_err(|e| format!("No se pudieron guardar las notas ({}): {e}", f.display()))?;
+    std::fs::rename(&tmp, &f).map_err(|e| format!("No se pudieron guardar las notas ({}): {e}", f.display()))
+}
+
 #[tauri::command]
 fn open_url(url: String) -> Result<(), String> {
     // Solo enlaces de donación de PayPal
@@ -359,7 +395,9 @@ pub fn run() {
             log_event,
             log_info,
             open_log_dir,
-            open_url
+            open_url,
+            notes_load,
+            notes_save
         ])
         .build(tauri::generate_context!())
         .unwrap_or_else(|e| {

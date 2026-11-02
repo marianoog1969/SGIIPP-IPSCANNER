@@ -325,3 +325,29 @@ tbody tr.picked { background: rgba(37, 99, 235, .10); }
 
 /* La barra de filtros pasa a otra línea en vez de cortarse */
 .subbar { flex-wrap: wrap; row-gap: 6px; }
+
+/* v2.4.0: columnas configurables, resumen, notas */
+thead th { position: sticky; }
+th .rz { position: absolute; right: 0; top: 0; bottom: 0; width: 6px; cursor: col-resize; }
+th .rz:hover { background: var(--accent); opacity: .5; }
+td.note { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.colmenu-wrap { position: relative; }
+.colmenu-bg { position: fixed; inset: 0; z-index: 29; }
+.colmenu {
+  position: fixed; z-index: 30; width: 270px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px;
+  box-shadow: 0 8px 24px rgba(0,0,0,.18); display: flex; flex-direction: column; gap: 6px;
+}
+.cm-row { display: flex; align-items: center; gap: 4px; }
+.cm-row label { flex: 1; display: flex; align-items: center; gap: 6px; font-size: 13px; }
+.cm-row input { width: auto; margin: 0; }
+.cm-row .btn { padding: 2px 7px; }
+.summary { display: flex; flex-wrap: wrap; gap: 8px; padding: 8px 14px; background: var(--panel); border-bottom: 1px solid var(--line); }
+.chip { border: 1px solid var(--line); background: var(--bg); color: var(--text); border-radius: 999px; padding: 3px 12px; font-size: 12.5px; cursor: pointer; }
+.chip:hover { border-color: var(--accent); }
+.chip.bad { color: var(--danger); }
+.chip.new { color: var(--accent); }
+.chip.on { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
+.sep-v { width: 1px; align-self: stretch; background: var(--line); margin: 0 4px; }
+.d-sec.notes input, .d-sec.notes textarea { display: block; width: 100%; margin: 6px 0; font: inherit; box-sizing: border-box; }
+.d-sec.notes textarea { resize: vertical; }
