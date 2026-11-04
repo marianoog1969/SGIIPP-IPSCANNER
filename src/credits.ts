@@ -15,3 +15,6 @@ export const CREDITS = {
  * Mientras esté vacío, el botón «Donar» no se muestra.
  */
 export const PAYPAL_URL = "https://www.paypal.me/marianoog";
+
+/** Repositorio de GitHub (usuario/repositorio) donde se publican las versiones; vacío = sin aviso de actualizaciones. */
+export const UPDATE_REPO = "marianoog1969/SGIIPP-IPSCANNER";

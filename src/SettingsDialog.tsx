@@ -12,6 +12,7 @@ export interface Settings {
   damewareArgs: string;
   lang: Lang;
   notesDir: string;
+  autoScanMin: number;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -25,6 +26,7 @@ export const DEFAULT_SETTINGS: Settings = {
   damewareArgs: "",
   lang: "es",
   notesDir: "",
+  autoScanMin: 0,
 };
 
 export default function SettingsDialog({
@@ -41,7 +43,7 @@ export default function SettingsDialog({
   const [s, setS] = useState(value);
   const set = (k: "centro" | "localidad" | "organismo" | "dameware" | "damewareArgs" | "notesDir") => (e: React.ChangeEvent<HTMLInputElement>) =>
     setS({ ...s, [k]: e.target.value });
-  const num = (k: "hilos" | "consultas", min: number, max: number) => (e: React.ChangeEvent<HTMLInputElement>) =>
+  const num = (k: "hilos" | "consultas" | "autoScanMin", min: number, max: number) => (e: React.ChangeEvent<HTMLInputElement>) =>
     setS({ ...s, [k]: Math.min(max, Math.max(min, Math.round(Number(e.target.value)) || min)) });
 
   return (
@@ -84,6 +86,10 @@ export default function SettingsDialog({
           <label className="field">
             <span>{t("Consultas de detalle simultáneas (1–20)")}</span>
             <input type="number" min={1} max={20} value={s.consultas} onChange={num("consultas", 1, 20)} />
+          </label>
+          <label className="field">
+            <span>{t("Repetir el escaneo automáticamente cada (minutos, 0 = no)")}</span>
+            <input type="number" min={0} max={1440} value={s.autoScanMin} onChange={num("autoScanMin", 0, 1440)} />
           </label>
           <p className="muted small" style={{ marginTop: 14 }}>
             {t("Control remoto. Escritorio remoto (RDP) usa el cliente de Windows. DameWare se detecta solo si está instalado; si no, indica aquí la ruta de")} <code>DWRCC.exe</code>.

@@ -1,18 +1,31 @@
 # SGIIPP-IPSCANER · Version history
 
-## 2.4.1
+## 2.6.0 · 2026-11-02
+- New: **per-device history** in the detail panel (first and last seen, previous names and IPs), tied to the MAC.
+- New: **Compare scans** (⇄ button): new devices, devices that no longer appear and IP or name changes between two of the last 10 scans; exportable to CSV.
+- New: **saved views** (☰ Views): ready-made filters («Disks in red», «New», «No access», printers, routers) and your own.
+- New: **several networks at once**: separate the ranges with commas (`192.168.1.0/24, 192.168.2.0/24`) or choose «All my networks».
+- New: **automatic scan** every N minutes (Settings) with a notice when new devices appear.
+- New: the news carry a **date** and are also in the manual.
+
+## 2.5.0 · 2026-11-02
+- New: on startup the devices from the last scan are shown (with its date) without running queries; they refresh when you press Scan.
+- New: **new version** notice (⬆ button on the toolbar) when a newer GitHub release exists. Shows nothing when offline.
+- New: 📝 mark next to the name of devices that have a note.
+
+## 2.4.1 · 2026-11-02
 - Fixed: the PDF report failed («Cannot read properties of undefined») when including long columns such as Model or Processor.
 
-## 2.4.0
+## 2.4.0 · 2026-10-30
 - New: per-device **notes and location** (in the detail panel), stored by MAC in `notas.json`; folder configurable in Settings to share them. Can be shown as a column, searched and included in PDF reports.
 - New: **configurable table columns** (show, hide, reorder and resize).
 - New: **clickable summary** under the bar: critical disks, new devices and no access.
 - New: **Select visible** and **Invert** in the selection bar (`Ctrl+A` / `Ctrl+I`).
 
-## 2.3.1
+## 2.3.1 · 2026-10-30
 - **Donate** (PayPal) button enabled on the toolbar and in «About».
 
-## 2.3.0
+## 2.3.0 · 2026-10-30
 - New: interface in **Spanish or English** (Settings → Language, or the ES/EN button on the toolbar). It covers the interface, the manual, the news and the PDF reports.
 - New: **Donate** (PayPal) button on the toolbar and in «About»; it only appears when a link is set in `src/credits.ts`.
 

@@ -36,6 +36,9 @@ import { logEvent } from "./log";
 import { t, tn, setLang, initialLang, locale } from "./i18n";
 import DonateButton from "./DonateButton";
 import { loadNotes, setNote, getNote, noteText } from "./notes";
+import { UPDATE_REPO } from "./credits";
+import CompareDialog from "./CompareDialog";
+import { recordScan, getHist } from "./history";
 import SettingsDialog, { DEFAULT_SETTINGS, Settings } from "./SettingsDialog";
 
 function AlertIcon({ info }: { info?: Info }) {
@@ -60,6 +63,7 @@ interface Prefs {
   kindFilter?: string;
   tcols?: string[];
   twidth?: Record<string, number>;
+  views?: SavedView[];
   hideNews?: boolean;
   sort?: { key: SortKey; asc: boolean };
   settings?: Settings;
@@ -73,10 +77,19 @@ const loadPrefs = (): Prefs => {
   }
 };
 
+interface SavedView {
+  name: string;
+  filter: string;
+  kind: string;
+  alerts: boolean;
+  quick: "" | "new" | "noaccess";
+  builtin?: boolean;
+}
 const LAST = "ipscanner.lastscan.v1";
 interface LastScan {
   at: number;
   ips: string[];
+  hosts?: Host[];
 }
 const loadLast = (): LastScan | null => {
   try {
@@ -98,7 +111,9 @@ export default function App() {
   const [range, setRange] = useState(prefs.range ?? "");
   const [hosts, setHosts] = useState<Map<string, Host>>(new Map());
   const hostsRef = useRef<Map<string, Host>>(new Map());
+  const rangeRef = useRef("");
   const [scanning, setScanning] = useState(false);
+  const scanningRef = useRef(false);
   const [progress, setProgress] = useState({ done: 0, total: 0 });
   const [filter, setFilter] = useState("");
   const [sort, setSort] = useState<{ key: SortKey; asc: boolean }>(prefs.sort ?? { key: "ip", asc: true });
@@ -114,7 +129,7 @@ export default function App() {
   const [settings, setSettings] = useState<Settings>({ ...DEFAULT_SETTINGS, ...prefs.settings });
   setLang(initialLang(settings.lang));
   const [reportCols, setReportCols] = useState<string[]>(prefs.reportCols ?? DEFAULT_COLS);
-  const [dialog, setDialog] = useState<null | "report" | "manual" | "news" | "log" | "about">(prefs.hideNews ? null : "news");
+  const [dialog, setDialog] = useState<null | "report" | "manual" | "news" | "log" | "about" | "compare">(prefs.hideNews ? null : "news");
   const [hideNews, setHideNews] = useState(prefs.hideNews ?? false);
   const [showSettings, setShowSettings] = useState(false);
   const [toast, setToast] = useState("");
@@ -127,6 +142,15 @@ export default function App() {
   const [notesVer, setNotesVer] = useState(0);
   const [notesLoads, setNotesLoads] = useState(0);
   const resized = useRef(false);
+  // Resultados del último escaneo mostrados al abrir (hasta que se escanee de nuevo)
+  const [views, setViews] = useState<SavedView[]>(prefs.views ?? []);
+  const [viewMenu, setViewMenu] = useState<null | { top: number; left: number }>(null);
+  const [viewName, setViewName] = useState("");
+  const [autoAlert, setAutoAlert] = useState("");
+  const autoRun = useRef(false);
+  const lastEnd = useRef(Date.now());
+  const [stale, setStale] = useState<number | null>(null);
+  const [update, setUpdate] = useState<null | { v: string; url: string }>(null);
   const lastChecked = useRef<string | null>(null);
   const shiftHeld = useRef(false);
   const [menu, setMenu] = useState<{ x: number; y: number; h: Host } | null>(null);
@@ -134,11 +158,11 @@ export default function App() {
 
   useEffect(() => {
     try {
-      localStorage.setItem(PREFS, JSON.stringify({ range, autoCheck, onlyAlerts, kindFilter, hideNews, sort, settings, reportCols, tcols, twidth }));
+      localStorage.setItem(PREFS, JSON.stringify({ range, autoCheck, onlyAlerts, kindFilter, hideNews, sort, settings, reportCols, tcols, twidth, views }));
     } catch {
       /* sin almacenamiento: no pasa nada */
     }
-  }, [range, autoCheck, onlyAlerts, kindFilter, hideNews, sort, settings, reportCols, tcols, twidth]);
+  }, [range, autoCheck, onlyAlerts, kindFilter, hideNews, sort, settings, reportCols, tcols, twidth, views]);
 
   // El texto de estado del pie queda en el idioma antiguo: se limpia al cambiar de idioma
   useEffect(() => {
@@ -180,11 +204,11 @@ export default function App() {
 
   // Comprobación de discos en segundo plano (equipos simultáneos según Ajustes) al terminar el escaneo
   useEffect(() => {
-    if (scanning || !autoCheck) return;
+    if (scanning || !autoCheck || stale) return;
     const pending = [...hosts.values()].filter((h) => !infos.has(h.ip));
     const running = [...infos.values()].filter((i) => i.loading).length;
     pending.slice(0, Math.max(0, settings.consultas - running)).forEach((h) => loadInfo(h, false));
-  }, [scanning, autoCheck, hosts, infos, loadInfo, settings.consultas]);
+  }, [scanning, autoCheck, stale, hosts, infos, loadInfo, settings.consultas]);
 
   const select = (h: Host) => {
     setSelected(h.ip);
@@ -206,8 +230,28 @@ export default function App() {
           setScanning(false);
           logEvent("info", `Escaneo ${e.payload.cancelled ? "detenido" : "completado"}: ${e.payload.found} equipos`);
           if (!e.payload.cancelled) {
+            const prev = loadLast();
+            if (autoRun.current && prev) {
+              const prevIps = new Set(prev.ips);
+              const nuevos = [...hostsRef.current.values()].filter((h) => !prevIps.has(h.ip));
+              if (nuevos.length)
+                setAutoAlert(
+                  t("Escaneo automático ({d}): {n} equipo(s) nuevo(s): {l}", {
+                    d: new Date().toLocaleTimeString(locale(), { hour: "2-digit", minute: "2-digit" }),
+                    n: nuevos.length,
+                    l: nuevos.slice(0, 5).map((h) => h.name || h.ip).join(", ") + (nuevos.length > 5 ? "…" : ""),
+                  })
+                );
+            }
+            autoRun.current = false;
+            lastEnd.current = Date.now();
             try {
-              localStorage.setItem(LAST, JSON.stringify({ at: Date.now(), ips: [...hostsRef.current.keys()] }));
+              recordScan([...hostsRef.current.values()], rangeRef.current);
+            } catch {
+              /* sin almacenamiento */
+            }
+            try {
+              localStorage.setItem(LAST, JSON.stringify({ at: Date.now(), ips: [...hostsRef.current.keys()], hosts: [...hostsRef.current.values()] }));
             } catch {
               /* sin almacenamiento */
             }
@@ -238,11 +282,14 @@ export default function App() {
       .catch((e) => setError(String(e)));
   }, []);
 
+  rangeRef.current = range;
+  scanningRef.current = scanning;
   const start = useCallback(async () => {
     logEvent("info", `Escaneo iniciado: ${range} (${settings.hilos} hilos)`);
     setError("");
     setMsg("");
     setPrevScan(loadLast());
+    setStale(null);
     setMarked(new Set());
     setHosts(new Map());
     setSelected(null);
@@ -256,6 +303,48 @@ export default function App() {
       setError(String(e));
     }
   }, [range, settings.hilos]);
+
+  // Escaneo automático periódico (solo si hay un intervalo en Ajustes y el programa está libre)
+  const startRef = useRef(start);
+  startRef.current = start;
+  useEffect(() => {
+    if (!settings.autoScanMin) return;
+    const id = window.setInterval(() => {
+      if (scanningRef.current || Date.now() - lastEnd.current < settings.autoScanMin * 60000) return;
+      autoRun.current = true;
+      lastEnd.current = Date.now();
+      startRef.current();
+    }, 30000);
+    return () => window.clearInterval(id);
+  }, [settings.autoScanMin]);
+
+  // Al abrir, se muestran los equipos del último escaneo (sin consultarlos) hasta que se escanee de nuevo
+  useEffect(() => {
+    const l = loadLast();
+    if (l?.hosts?.length) {
+      setHosts(new Map(l.hosts.map((h) => [h.ip, h])));
+      setStale(l.at);
+    }
+  }, []);
+
+  // Aviso de versión nueva (GitHub Releases); si no hay red, no se muestra nada
+  useEffect(() => {
+    if (!UPDATE_REPO) return;
+    const ctl = new AbortController();
+    const to = setTimeout(() => ctl.abort(), 6000);
+    fetch(`https://api.github.com/repos/${UPDATE_REPO}/releases/latest`, { signal: ctl.signal, headers: { Accept: "application/vnd.github+json" } })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => {
+        const tag = String(j?.tag_name ?? "").replace(/^v/i, "");
+        const num = (v: string) => v.split(".").map((x) => parseInt(x, 10) || 0);
+        const [a, b] = [num(tag), num(__APP_VERSION__)];
+        const newer = a[0] !== b[0] ? a[0] > b[0] : a[1] !== b[1] ? a[1] > b[1] : a[2] > b[2];
+        if (/^\d+\.\d+\.\d+$/.test(tag) && newer) setUpdate({ v: tag, url: String(j.html_url || `https://github.com/${UPDATE_REPO}/releases/latest`) });
+      })
+      .catch(() => {})
+      .finally(() => clearTimeout(to));
+    return () => clearTimeout(to);
+  }, []);
 
   // Si la sesión anterior se cerró sin avisar, se abre el registro automáticamente
   useEffect(() => {
@@ -387,7 +476,7 @@ export default function App() {
 
   const infoCell = (h: Host, v: string | null, label = "—") => {
     const s = infos.get(h.ip);
-    if (!s) return autoCheck ? <span className="skel" /> : <span className="muted">—</span>;
+    if (!s) return autoCheck && !stale ? <span className="skel" /> : <span className="muted">—</span>;
     if (s.loading) return <span className="skel" />;
     if (s.error)
       return (
@@ -472,6 +561,29 @@ export default function App() {
     if (next.nota.trim() === cur.nota && next.ubic.trim() === cur.ubic) return;
     setNote(h, next, settings.notesDir, (m) => setError(m));
     setNotesVer((v) => v + 1);
+  };
+
+  const BUILTIN_VIEWS = (): SavedView[] => [
+    { name: "Discos en rojo", filter: "", kind: "all", alerts: true, quick: "", builtin: true },
+    { name: "Nuevos desde el escaneo anterior", filter: "", kind: "all", alerts: false, quick: "new", builtin: true },
+    { name: "Sin acceso", filter: "", kind: "all", alerts: false, quick: "noaccess", builtin: true },
+    { name: "Impresoras", filter: "", kind: "printer", alerts: false, quick: "", builtin: true },
+    { name: "Routers y red", filter: "", kind: "router", alerts: false, quick: "", builtin: true },
+  ];
+  const applyView = (v: SavedView) => {
+    setFilter(v.filter);
+    setKindFilter(v.kind);
+    setOnlyAlerts(v.alerts);
+    setQuick(v.quick);
+    setViewMenu(null);
+  };
+  const saveView = () => {
+    const name = viewName.trim();
+    if (!name) return;
+    const v: SavedView = { name, filter, kind: kindFilter, alerts: onlyAlerts, quick };
+    setViews((cur) => [...cur.filter((x) => x.name !== name), v]);
+    setViewName("");
+    notify(t("Vista guardada"));
   };
 
   const markVisible = () => setMarked((p) => new Set([...p, ...rows.map((h) => h.ip)]));
@@ -603,6 +715,7 @@ export default function App() {
         <td key="name" onDoubleClick={() => h.name && copy(h.name, t("Nombre"))}>
           <DeviceIcon kind={deviceKind(h, infos.get(h.ip)?.info)} />
           {h.name || <span className="muted">—</span>}
+          {getNote(h) && <span className="note-mark" title={noteText(h)}>📝</span>}
           {prevScan && !prevSet.has(h.ip) && (
             <span className="badge-nuevo" title={t("No estaba en el escaneo anterior")}>{t("Nuevo")}</span>
           )}
@@ -706,6 +819,7 @@ export default function App() {
               title={t("Redes detectadas en este equipo")}
             >
               <option value="">{t("Mis redes…")}</option>
+              {networks.length > 1 && <option value={networks.map((n) => n.cidr).join(", ")}>{t("Todas mis redes")}</option>}
               {networks.map((n) => (
                 <option key={n.name + n.ip} value={n.cidr}>
                   {n.cidr} ({n.ip})
@@ -720,6 +834,15 @@ export default function App() {
           <button className="btn primary" onClick={start} disabled={!range.trim()}>▶ {t("Escanear")}</button>
         )}
         <div className="tools">
+          {update && (
+            <button
+              className="btn update"
+              onClick={() => invoke("open_url", { url: update.url }).catch((e) => setError(String(e)))}
+              title={t("Hay una versión nueva ({v}). Pulsa para ver la descarga.", { v: update.v })}
+            >
+              ⬆ v{update.v}
+            </button>
+          )}
           <DonateButton compact />
           <button
             className="btn icon lang"
@@ -728,6 +851,7 @@ export default function App() {
           >
             {settings.lang === "en" ? "ES" : "EN"}
           </button>
+          <button className="btn icon" onClick={() => setDialog("compare")} title={t("Comparar escaneos")}>⇄</button>
           <button className="btn icon" onClick={() => setShowSettings(true)} title={t("Ajustes (nombre del centro)")}>⚙</button>
           <button className="btn icon" onClick={() => setDialog("manual")} title={t("Manual de usuario (F1)")}>?</button>
         </div>
@@ -801,6 +925,40 @@ export default function App() {
         </button>
         <div className="colmenu-wrap">
           <button
+            className="btn"
+            onClick={(e) => {
+              if (viewMenu) return setViewMenu(null);
+              const b = e.currentTarget.getBoundingClientRect();
+              setViewMenu({ top: b.bottom + 6, left: Math.max(8, Math.min(b.left, window.innerWidth - 288)) });
+            }}
+            title={t("Vistas guardadas")}
+          >
+            ☰ {t("Vistas")}
+          </button>
+          {viewMenu && (
+            <>
+              <div className="colmenu-bg" onClick={() => setViewMenu(null)} />
+              <div className="colmenu" role="menu" style={{ top: viewMenu.top, left: viewMenu.left }}>
+                <b>{t("Vistas guardadas")}</b>
+                {[...BUILTIN_VIEWS(), ...views].map((v) => (
+                  <div key={(v.builtin ? "b-" : "u-") + v.name} className="cm-row">
+                    <button className="btn view-apply" onClick={() => applyView(v)}>{v.builtin ? t(v.name) : v.name}</button>
+                    {!v.builtin && (
+                      <button className="btn" onClick={() => setViews((cur) => cur.filter((x) => x.name !== v.name))} title={t("Borrar vista")}>✕</button>
+                    )}
+                  </div>
+                ))}
+                <div className="cm-row">
+                  <input value={viewName} onChange={(e) => setViewName(e.target.value)} placeholder={t("Nombre de la vista")} onKeyDown={(e) => e.key === "Enter" && saveView()} />
+                  <button className="btn" disabled={!viewName.trim()} onClick={saveView}>{t("Guardar")}</button>
+                </div>
+                <span className="muted small">{t("Guarda el filtro, el tipo y los avisos activos.")}</span>
+              </div>
+            </>
+          )}
+        </div>
+        <div className="colmenu-wrap">
+          <button
             className="btn icon"
             onClick={(e) => {
               if (colMenu) return setColMenu(null);
@@ -864,6 +1022,20 @@ export default function App() {
               {tn(noAccessCount, "{n} sin acceso", "{n} sin acceso")}
             </button>
           )}
+        </div>
+      )}
+
+      {autoAlert && (
+        <div className="stale auto" role="alert">
+          <span>{autoAlert}</span>
+          <button className="btn" onClick={() => setAutoAlert("")}>{t("Entendido")}</button>
+        </div>
+      )}
+
+      {stale && !scanning && hosts.size > 0 && (
+        <div className="stale" role="status">
+          <span>{t("Resultados del escaneo del {d}. Pulsa Escanear para actualizarlos.", { d: new Date(stale).toLocaleString(locale()) })}</span>
+          <button className="btn" onClick={start} disabled={!range.trim()}>▶ {t("Escanear")}</button>
         </div>
       )}
 
@@ -1038,6 +1210,26 @@ export default function App() {
             />
             {!sel.mac && <p className="muted small">{t("Sin MAC: la nota se asocia a la IP.")}</p>}
           </div>
+          {(() => {
+            const hh = getHist(sel);
+            if (!hh) return null;
+            const f = (n: number) => new Date(n).toLocaleDateString(locale());
+            const otherNames = hh.names.filter((n) => n !== sel.name);
+            const otherIps = hh.ips.filter((i) => i !== sel.ip);
+            return (
+              <div className="d-sec">
+                <h3>{t("Historial")}</h3>
+                <dl>
+                  <dt>{t("Visto por primera vez")}</dt>
+                  <dd>{f(hh.first)}</dd>
+                  <dt>{t("Visto por última vez")}</dt>
+                  <dd>{f(hh.last)}</dd>
+                  {otherNames.length > 0 && (<><dt>{t("Nombres anteriores")}</dt><dd>{otherNames.join(", ")}</dd></>)}
+                  {otherIps.length > 0 && (<><dt>{t("IP anteriores")}</dt><dd>{otherIps.join(", ")}</dd></>)}
+                </dl>
+              </div>
+            );
+          })()}
 
           <div className="d-sec">
             <h3>{t("Equipo")}</h3>
@@ -1212,6 +1404,7 @@ export default function App() {
         <NewsDialog hideOnStart={hideNews} onHideChange={setHideNews} onClose={() => setDialog(null)} />
       )}
       {dialog === "about" && <AboutDialog onClose={() => setDialog(null)} onManual={() => setDialog("manual")} />}
+      {dialog === "compare" && <CompareDialog onClose={() => setDialog(null)} notify={notify} />}
       {dialog === "log" && <LogDialog onClose={() => setDialog(null)} notify={notify} />}
       {dialog === "manual" && <Manual onClose={() => setDialog(null)} />}
       {showSettings && (
@@ -1234,7 +1427,7 @@ export default function App() {
       <footer className="status">
         <span>{tn(hosts.size, "{n} equipo", "{n} equipos")}{rows.length !== hosts.size && ` (${t("{n} mostrados", { n: rows.length })})`}</span>
         {scanning && <span>{progress.done}/{progress.total} · {pct}%</span>}
-        {!scanning && autoCheck && alive.length > 0 && checked < alive.length && (
+        {!scanning && autoCheck && !stale && alive.length > 0 && checked < alive.length && (
           <span title={t("Consultando cada equipo: sistema operativo, RAM, discos y último usuario")}>{t("Leyendo SO, RAM, discos y usuario: {a} de {b}…", { a: checked, b: alive.length })}</span>
         )}
         {prevScan && newCount > 0 && (

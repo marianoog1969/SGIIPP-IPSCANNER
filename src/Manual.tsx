@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { t, getLang } from "./i18n";
 import { SECTIONS_ES, type Block, type Section } from "./manual.es";
 import { SECTIONS_EN } from "./manual.en";
+import { lastEntries, fmtDate } from "./NewsDialog";
 
 // Texto con **negrita** y `código`
 function inline(s: string) {
@@ -89,7 +90,21 @@ function renderBlock(b: Block, i: number) {
 
 export default function Manual({ onClose }: { onClose: () => void }) {
   const [q, setQ] = useState("");
-  const SECTIONS = getLang() === "en" ? SECTIONS_EN : SECTIONS_ES;
+  const base = getLang() === "en" ? SECTIONS_EN : SECTIONS_ES;
+  const SECTIONS: Section[] = useMemo(
+    () => [
+      ...base,
+      {
+        id: "novedades",
+        title: t("Novedades"),
+        blocks: lastEntries(8).flatMap((e): Block[] => [
+          { t: "h", x: `${t("Versión")} ${e.version}${e.date ? ` · ${fmtDate(e.date)}` : ""}` },
+          { t: "ul", x: e.items },
+        ]),
+      },
+    ],
+    [base]
+  );
   const [active, setActive] = useState(SECTIONS[0].id);
 
   const shown = useMemo(() => {

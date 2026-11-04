@@ -45,7 +45,33 @@ pub type EmitFn = Arc<dyn Fn(ScanEvent) + Send + Sync>;
 // ───────────────────────── Rango de IPs ─────────────────────────
 
 /// Acepta: "192.168.1.0/24", "192.168.1.1-192.168.1.50", "192.168.1.1-50", "192.168.1.7"
+/// Uno o varios rangos separados por coma, punto y coma o salto de línea.
+/// Se eliminan las IP repetidas y se mantiene el orden.
 pub fn parse_range(s: &str) -> Result<Vec<Ipv4Addr>, String> {
+    let parts: Vec<&str> = s
+        .split(|c| c == ',' || c == ';' || c == '\n')
+        .map(|x| x.trim())
+        .filter(|x| !x.is_empty())
+        .collect();
+    if parts.is_empty() {
+        return Err("Indica un rango de red".into());
+    }
+    let mut seen = std::collections::HashSet::new();
+    let mut out = Vec::new();
+    for p in parts {
+        for ip in parse_one(p)? {
+            if seen.insert(ip) {
+                out.push(ip);
+            }
+        }
+    }
+    if out.len() > 65_536 {
+        return Err("Demasiadas direcciones en total (máximo 65.536)".into());
+    }
+    Ok(out)
+}
+
+fn parse_one(s: &str) -> Result<Vec<Ipv4Addr>, String> {
     let s = s.trim();
     let bad = |what: &str| format!("{} no válida: {}", what, s);
 
@@ -844,6 +870,8 @@ mod tests {
         assert!(parse_range("10.0.0.9-5").is_err());
         assert!(parse_range("10.0.0.0/8").is_err());
         assert!(parse_range("hola").is_err());
+        assert_eq!(parse_range("10.0.0.1-3, 10.0.1.0/30; 10.0.0.2").unwrap().len(), 5);
+        assert!(parse_range(" , ").is_err());
     }
 
     #[test]

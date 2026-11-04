@@ -14,19 +14,32 @@ npm run version:minor    # novedades
 npm run version:major    # cambio mayor
 ```
 
-## 2.4.1
+## 2.6.0 · 2026-11-02
+- Nuevo: **historial por equipo** en la ficha (primera y última vez visto, nombres e IP anteriores), asociado a la MAC.
+- Nuevo: **Comparar escaneos** (botón ⇄): equipos nuevos, que ya no aparecen y cambios de IP o de nombre entre dos de los últimos 10 escaneos; exportable a CSV.
+- Nuevo: **vistas guardadas** (☰ Vistas): filtros listos («Discos en rojo», «Nuevos», «Sin acceso», impresoras, routers) y las tuyas.
+- Nuevo: **varias redes a la vez**: separa los rangos con comas (`192.168.1.0/24, 192.168.2.0/24`) o elige «Todas mis redes».
+- Nuevo: **escaneo automático** cada N minutos (Ajustes) con aviso si aparecen equipos nuevos.
+- Nuevo: las novedades llevan **fecha** y también están en el manual.
+
+## 2.5.0 · 2026-11-02
+- Nuevo: al abrir se muestran los equipos del último escaneo (con su fecha) sin lanzar consultas; se actualizan al pulsar Escanear.
+- Nuevo: aviso de **versión nueva** (botón ⬆ en la barra) al haber una release más reciente en GitHub. Sin red no muestra nada.
+- Nuevo: marca 📝 junto al nombre de los equipos con nota.
+
+## 2.4.1 · 2026-11-02
 - Corregido: el informe PDF fallaba («Cannot read properties of undefined») al incluir columnas largas como Modelo o Procesador.
 
-## 2.4.0
+## 2.4.0 · 2026-10-30
 - Nuevo: **notas y ubicación** por equipo (en la ficha), guardadas por MAC en `notas.json`; carpeta configurable en Ajustes para compartirlas. Se pueden mostrar como columna, buscar y llevar a los informes PDF.
 - Nuevo: **columnas de la tabla configurables** (mostrar, ocultar, ordenar y ensanchar).
 - Nuevo: **resumen clicable** bajo la barra: discos críticos, equipos nuevos y sin acceso.
 - Nuevo: **Marcar visibles** e **Invertir** en la barra de selección (`Ctrl+A` / `Ctrl+I`).
 
-## 2.3.1
+## 2.3.1 · 2026-10-30
 - Botón **Donar** (PayPal) activado en la barra y en «Acerca de».
 
-## 2.3.0
+## 2.3.0 · 2026-10-30
 - Nuevo: interfaz en **español o inglés** (Ajustes → Idioma, o el botón ES/EN de la barra). Afecta a la interfaz, el manual, las novedades y los informes PDF.
 - Nuevo: botón **Donar** (PayPal) en la barra y en «Acerca de»; se muestra solo si hay un enlace configurado en `src/credits.ts`.
 

@@ -1,6 +1,6 @@
 [package]
 name = "SGIIPP-IPSCANER"
-version = "2.4.1"
+version = "2.6.0"
 description = "SGIIPP-IPSCANER: escáner de red (nombre, IP, MAC, sistema, RAM y discos)"
 edition = "2021"
 

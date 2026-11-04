@@ -311,8 +311,13 @@ fn notes_save(dir: String, json: String) -> Result<(), String> {
 
 #[tauri::command]
 fn open_url(url: String) -> Result<(), String> {
-    // Solo enlaces de donación de PayPal
-    let ok = ["https://www.paypal.com/", "https://paypal.me/", "https://www.paypal.me/"]
+    // Solo enlaces de donación de PayPal y las descargas del propio repositorio
+    let ok = [
+        "https://www.paypal.com/",
+        "https://paypal.me/",
+        "https://www.paypal.me/",
+        "https://github.com/marianoog1969/SGIIPP-IPSCANNER/",
+    ]
         .iter()
         .any(|p| url.starts_with(p))
         && !url.contains(char::is_whitespace);

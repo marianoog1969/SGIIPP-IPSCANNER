@@ -1,9 +1,12 @@
 import changelogEs from "../CHANGELOG.md?raw";
 import changelogEn from "../CHANGELOG.en.md?raw";
-import { t, getLang } from "./i18n";
+import { t, getLang, locale } from "./i18n";
+
+export const fmtDate = (d?: string) => (d ? new Date(d + "T12:00:00").toLocaleDateString(locale(), { day: "numeric", month: "long", year: "numeric" }) : "");
 
 interface Entry {
   version: string;
+  date?: string;
   items: string[];
 }
 
@@ -12,9 +15,9 @@ export function lastEntries(n: number): Entry[] {
   const out: Entry[] = [];
   let cur: Entry | null = null;
   for (const line of (getLang() === "en" ? changelogEn : changelogEs).split(/\r?\n/)) {
-    const h = line.match(/^## (\d+\.\d+\.\d+)\s*$/);
+    const h = line.match(/^## (\d+\.\d+\.\d+)(?:\s*·\s*(\d{4}-\d{2}-\d{2}))?\s*$/);
     if (h) {
-      cur = { version: h[1], items: [] };
+      cur = { version: h[1], date: h[2], items: [] };
       out.push(cur);
     } else if (cur && line.startsWith("- ")) {
       cur.items.push(line.slice(2));
@@ -50,7 +53,7 @@ export default function NewsDialog({
           {entries.map((e, i) => (
             <section key={e.version}>
               <h3>
-                {t("Versión")} {e.version} {i === 0 && <span className="badge-new">{t("Nueva")}</span>}
+                {t("Versión")} {e.version}{e.date && <span className="news-date"> · {fmtDate(e.date)}</span>} {i === 0 && <span className="badge-new">{t("Nueva")}</span>}
               </h3>
               <ul>
                 {e.items.map((it, j) => (
