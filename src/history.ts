@@ -88,3 +88,6 @@ export function diffSnaps(a: Snap, b: Snap): Diff {
   });
   return d;
 }
+
+/** Todas las claves (MAC) vistas alguna vez; sirve de base para los «equipos conocidos». */
+export const histKeys = (): string[] => Object.keys(hist()).filter((k) => !k.startsWith("ip:"));

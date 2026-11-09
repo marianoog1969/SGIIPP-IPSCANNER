@@ -6,7 +6,7 @@ import { saveBytes } from "./files";
 const fmt = (at: number) => new Date(at).toLocaleString(locale());
 const label = (h: SnapHost) => `${h.name || "—"} · ${h.ip}${h.mac ? ` · ${h.mac}` : ""}`;
 
-export default function CompareDialog({ onClose, notify }: { onClose: () => void; notify: (s: string) => void }) {
+export default function CompareDialog({ onClose, notify, onWake }: { onClose: () => void; notify: (s: string) => void; onWake: (l: SnapHost[]) => void }) {
   const snaps = useMemo(() => loadSnaps(), []);
   const [a, setA] = useState(Math.max(0, snaps.length - 2));
   const [b, setB] = useState(Math.max(0, snaps.length - 1));
@@ -67,6 +67,13 @@ export default function CompareDialog({ onClose, notify }: { onClose: () => void
                 <>
                   {section(t("Equipos nuevos"), diff.added.map(label))}
                   {section(t("Ya no aparecen"), diff.removed.map(label))}
+                  {diff.removed.some((h) => h.mac) && (
+                    <p>
+                      <button className="btn" onClick={() => onWake(diff.removed)} title={t("Enviar la orden de encendido (Wake-on-LAN) a los equipos marcados")}>
+                        {t("Encender los que ya no aparecen")}
+                      </button>
+                    </p>
+                  )}
                   {section(t("Cambios de IP"), diff.ipChanged.map((c) => `${c.to.name || c.to.mac}: ${c.from.ip} → ${c.to.ip}`))}
                   {section(t("Cambios de nombre"), diff.nameChanged.map((c) => `${c.to.ip}: ${c.from.name} → ${c.to.name}`))}
                 </>

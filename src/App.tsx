@@ -22,8 +22,9 @@ import {
   fmtBytes,
   ipNum,
   deviceKind,
+  osVersion,
 } from "./lib";
-import { DEFAULT_COLS, Row } from "./columns";
+import { COLS, colLabel, DEFAULT_COLS, Row } from "./columns";
 import { saveBytes } from "./files";
 import Manual from "./Manual";
 import ReportDialog from "./ReportDialog";
@@ -38,7 +39,9 @@ import DonateButton from "./DonateButton";
 import { loadNotes, setNote, getNote, noteText } from "./notes";
 import { UPDATE_REPO } from "./credits";
 import CompareDialog from "./CompareDialog";
-import { recordScan, getHist } from "./history";
+import { recordScan, getHist, histKeys } from "./history";
+import { loadStars, saveStars, starKey, loadKnown, saveKnown, hasMac } from "./marks";
+import { vendorOf, isRandomMac } from "./oui";
 import SettingsDialog, { DEFAULT_SETTINGS, Settings } from "./SettingsDialog";
 
 function AlertIcon({ info }: { info?: Info }) {
@@ -82,7 +85,7 @@ interface SavedView {
   filter: string;
   kind: string;
   alerts: boolean;
-  quick: "" | "new" | "noaccess";
+  quick: "" | "new" | "noaccess" | "conflict" | "star" | "unknown";
   builtin?: boolean;
 }
 const LAST = "ipscanner.lastscan.v1";
@@ -100,8 +103,8 @@ const loadLast = (): LastScan | null => {
   }
 };
 
-const TCOL_KEYS = ["name", "ip", "mac", "user", "os", "ram", "disk", "ms", "note"];
-const DEFAULT_TCOLS = ["name", "ip", "mac", "user", "os", "ram", "disk", "ms"];
+const TCOL_KEYS = ["name", "ip", "mac", "vendor", "user", "os", "osver", "ram", "disk", "ms", "note"];
+const DEFAULT_TCOLS = ["name", "ip", "mac", "user", "os", "osver", "ram", "disk", "ms"];
 
 export default function App() {
   const prefs = useRef<Prefs>(loadPrefs()).current;
@@ -135,7 +138,9 @@ export default function App() {
   const [toast, setToast] = useState("");
   const toastTimer = useRef<number | undefined>(undefined);
   const [marked, setMarked] = useState<Set<string>>(new Set());
-  const [quick, setQuick] = useState<"" | "new" | "noaccess">("");
+  const [quick, setQuick] = useState<"" | "new" | "noaccess" | "conflict" | "star" | "unknown">("");
+  const [stars, setStars] = useState<Set<string>>(() => loadStars());
+  const [known, setKnown] = useState(() => loadKnown());
   const [tcols, setTcols] = useState<string[]>(prefs.tcols ?? DEFAULT_TCOLS);
   const [twidth, setTwidth] = useState<Record<string, number>>(prefs.twidth ?? {});
   const [colMenu, setColMenu] = useState<null | { top: number; left: number }>(null);
@@ -149,12 +154,15 @@ export default function App() {
   const [autoAlert, setAutoAlert] = useState("");
   const autoRun = useRef(false);
   const lastEnd = useRef(Date.now());
+  const [actMenu, setActMenu] = useState<null | { top: number; left: number }>(null);
+  const [msgAsk, setMsgAsk] = useState<null | string>(null);
   const [stale, setStale] = useState<number | null>(null);
   const [update, setUpdate] = useState<null | { v: string; url: string }>(null);
   const lastChecked = useRef<string | null>(null);
   const shiftHeld = useRef(false);
   const [menu, setMenu] = useState<{ x: number; y: number; h: Host } | null>(null);
   const filterRef = useRef<HTMLInputElement>(null);
+  const unkAlert = useRef("");
 
   useEffect(() => {
     try {
@@ -230,6 +238,22 @@ export default function App() {
           setScanning(false);
           logEvent("info", `Escaneo ${e.payload.cancelled ? "detenido" : "completado"}: ${e.payload.found} equipos`);
           if (!e.payload.cancelled) {
+            const kn0 = loadKnown();
+            const curHosts = [...hostsRef.current.values()];
+            if (!kn0.init) {
+              // primer escaneo: lo visto hasta ahora se considera conocido
+              const kn1 = { init: true, keys: [...new Set([...histKeys(), ...curHosts.filter(hasMac).map(starKey)])] };
+              saveKnown(kn1);
+              setKnown(kn1);
+            } else if (autoRun.current) {
+              const ks = new Set(kn0.keys);
+              const unk = curHosts.filter((h) => hasMac(h) && !ks.has(starKey(h)));
+              if (unk.length) unkAlert.current = t("Escaneo automático ({d}): {n} equipo(s) desconocido(s): {l}", {
+                d: new Date().toLocaleTimeString(locale(), { hour: "2-digit", minute: "2-digit" }),
+                n: unk.length,
+                l: unk.slice(0, 5).map((h) => h.name || h.ip).join(", ") + (unk.length > 5 ? "…" : ""),
+              });
+            }
             const prev = loadLast();
             if (autoRun.current && prev) {
               const prevIps = new Set(prev.ips);
@@ -242,6 +266,10 @@ export default function App() {
                     l: nuevos.slice(0, 5).map((h) => h.name || h.ip).join(", ") + (nuevos.length > 5 ? "…" : ""),
                   })
                 );
+            }
+            if (unkAlert.current) {
+              setAutoAlert(unkAlert.current);
+              unkAlert.current = "";
             }
             autoRun.current = false;
             lastEnd.current = Date.now();
@@ -377,6 +405,70 @@ export default function App() {
     });
   }, [settings.notesDir]);
 
+  // Posibles conflictos de red (solo con el escaneo terminado):
+  //  · la misma MAC responde en varias IP;
+  //  · una IP que en el escaneo anterior tenía otra MAC (equipo cambiado o IP duplicada).
+  const conflicts = useMemo(() => {
+    const out = new Map<string, string[]>();
+    if (scanning) return out;
+    const add = (ip: string, msg: string) => out.set(ip, [...(out.get(ip) ?? []), msg]);
+    const byMac = new Map<string, string[]>();
+    hosts.forEach((h) => {
+      if (h.mac) byMac.set(h.mac.toUpperCase(), [...(byMac.get(h.mac.toUpperCase()) ?? []), h.ip]);
+    });
+    byMac.forEach((ips, mac) => {
+      if (ips.length > 1)
+        ips.forEach((ip) => add(ip, t("La MAC {mac} también responde en: {ips}", { mac, ips: ips.filter((x) => x !== ip).join(", ") })));
+    });
+    const before = new Map((prevScan?.hosts ?? []).filter((h) => h.mac).map((h) => [h.ip, h.mac.toUpperCase()]));
+    hosts.forEach((h) => {
+      const old = before.get(h.ip);
+      if (h.mac && old && old !== h.mac.toUpperCase())
+        add(h.ip, t("Esta IP tenía antes la MAC {old}: equipo cambiado o IP duplicada", { old }));
+    });
+    return out;
+  }, [hosts, scanning, prevScan]);
+
+  const knownSet = useMemo(() => new Set(known.keys), [known]);
+  const unknown = useMemo(() => {
+    const out = new Set<string>();
+    if (scanning || !known.init) return out;
+    for (const h of hosts.values()) if (hasMac(h) && !knownSet.has(starKey(h))) out.add(h.ip);
+    return out;
+  }, [hosts, scanning, known, knownSet]);
+  const isStar = (h: Host) => stars.has(starKey(h));
+  const starCount = useMemo(() => [...hosts.values()].filter((h) => stars.has(starKey(h))).length, [hosts, stars]);
+  // si el filtro rápido se queda sin equipos (p. ej. al marcarlos como conocidos), se quita solo
+  useEffect(() => {
+    if (scanning) return;
+    if ((quick === "unknown" && unknown.size === 0) || (quick === "star" && starCount === 0)) setQuick("");
+  }, [quick, unknown, starCount, scanning]);
+  const toggleStar = (h: Host) =>
+    setStars((cur) => {
+      const n = new Set(cur);
+      const k = starKey(h);
+      if (n.has(k)) n.delete(k);
+      else n.add(k);
+      saveStars(n);
+      return n;
+    });
+  const markKnown = (list: Host[]) => {
+    const ks = new Set(known.keys);
+    list.filter(hasMac).forEach((h) => ks.add(starKey(h)));
+    const k = { init: true, keys: [...ks] };
+    saveKnown(k);
+    setKnown(k);
+    notify(t("Marcado como conocido"));
+  };
+  const fichaText = (h: Host) => {
+    const info = infos.get(h.ip)?.info;
+    const lines = COLS.filter((c) => c.key !== "estado")
+      .map((c) => [colLabel(c), c.get({ h, info })] as const)
+      .filter(([, v]) => v && v !== "-");
+    return lines.map(([k, v]) => `${k}: ${v}`).join("\n");
+  };
+
+
   const rows = useMemo(() => {
     const f = filter.trim().toLowerCase();
     let list = [...hosts.values()];
@@ -387,6 +479,9 @@ export default function App() {
       });
     if (kindFilter !== "all") list = list.filter((h) => groupOf(h) === kindFilter);
     if (quick === "new") list = list.filter((h) => prevScan && !prevSet.has(h.ip));
+    if (quick === "conflict") list = list.filter((h) => conflicts.has(h.ip));
+    if (quick === "star") list = list.filter((h) => stars.has(starKey(h)));
+    if (quick === "unknown") list = list.filter((h) => unknown.has(h.ip));
     if (quick === "noaccess") list = list.filter((h) => !!infos.get(h.ip)?.error);
     if (f)
       list = list.filter((h) =>
@@ -412,7 +507,7 @@ export default function App() {
       }
     });
     return list;
-  }, [hosts, filter, sort, onlyAlerts, kindFilter, infos, quick, prevScan, prevSet, notesVer]);
+  }, [hosts, filter, sort, onlyAlerts, kindFilter, infos, quick, prevScan, prevSet, notesVer, conflicts, stars, unknown]);
 
   // Atajos de teclado
   useEffect(() => {
@@ -567,6 +662,8 @@ export default function App() {
     { name: "Discos en rojo", filter: "", kind: "all", alerts: true, quick: "", builtin: true },
     { name: "Nuevos desde el escaneo anterior", filter: "", kind: "all", alerts: false, quick: "new", builtin: true },
     { name: "Sin acceso", filter: "", kind: "all", alerts: false, quick: "noaccess", builtin: true },
+    { name: "Equipos importantes", filter: "", kind: "all", alerts: false, quick: "star", builtin: true },
+    { name: "Equipos desconocidos", filter: "", kind: "all", alerts: false, quick: "unknown", builtin: true },
     { name: "Impresoras", filter: "", kind: "printer", alerts: false, quick: "", builtin: true },
     { name: "Routers y red", filter: "", kind: "router", alerts: false, quick: "", builtin: true },
   ];
@@ -643,6 +740,58 @@ export default function App() {
     if (fails.length) setError(`${t("{n} equipo(s) con error:", { n: fails.length })}\n${fails.slice(0, 5).join("\n")}${fails.length > 5 ? "\n…" : ""}`);
   };
 
+  const wake = async (list: { mac: string; ip: string; name?: string }[]) => {
+    const withMac = list.filter((h) => h.mac);
+    if (!withMac.length) return setError(t("Ningún equipo seleccionado tiene MAC conocida."));
+    const res = await Promise.allSettled(withMac.map((h) => invoke("wake_on_lan", { mac: h.mac, ip: h.ip })));
+    const fails = res.filter((x) => x.status === "rejected").length;
+    logEvent("info", `Wake-on-LAN a ${withMac.length} equipos (${fails} con error)`);
+    notify(
+      fails
+        ? t("Encendido enviado a {n} equipo(s) · {f} con error", { n: withMac.length - fails, f: fails })
+        : t("Orden de encendido enviada a {n}. Pueden tardar un minuto en responder.", { n: tn(withMac.length, "{n} equipo", "{n} equipos") })
+    );
+  };
+
+  const ACTIONS: { id: string; label: string; what: string }[] = [
+    { id: "gpupdate", label: t("Actualizar directivas (gpupdate /force)"), what: t("ejecutará «gpupdate /force»") },
+    { id: "flushdns", label: t("Vaciar la caché DNS"), what: t("ejecutará «ipconfig /flushdns»") },
+    { id: "spooler", label: t("Reiniciar la cola de impresión"), what: t("reiniciará el servicio de cola de impresión (spooler)") },
+    { id: "msg", label: t("Enviar un mensaje al usuario…"), what: t("mostrará el mensaje en la pantalla del usuario") },
+  ];
+
+  const runAction = async (id: string, text?: string) => {
+    const act = ACTIONS.find((a) => a.id === id)!;
+    const targets = [...hosts.values()].filter((h) => marked.has(h.ip));
+    if (!targets.length) return;
+    const names = targets.slice(0, 12).map((h) => `• ${h.name || h.ip} (${h.ip})`).join("\n");
+    const more = targets.length > 12 ? `\n${t("… y {n} más", { n: targets.length - 12 })}` : "";
+    const ok = await confirm(
+      `${t("En {n} se {w}.", { n: tn(targets.length, "{n} equipo", "{n} equipos"), w: act.what })}\n\n${names}${more}\n\n${t("Se ejecuta con tu usuario de Windows (necesita ser administrador de esos equipos) y queda anotado en el registro.")}`,
+      { title: act.label.replace("…", ""), kind: "warning", okLabel: t("Ejecutar"), cancelLabel: t("Cancelar") }
+    );
+    if (!ok) return;
+    logEvent("info", `Acción masiva ${id} sobre ${targets.length} equipos: ${targets.map((h) => h.ip).join(", ")}`);
+    const fails: string[] = [];
+    let next = 0;
+    await Promise.all(
+      Array.from({ length: Math.min(5, targets.length) }, async () => {
+        while (next < targets.length) {
+          const h = targets[next++];
+          try {
+            await invoke("run_action", { action: id, ip: h.ip, text: text ?? null });
+          } catch (e) {
+            fails.push(`${h.name || h.ip}: ${e}`);
+            logEvent("warn", `Acción ${id} en ${h.ip}: ${e}`);
+          }
+        }
+      })
+    );
+    const okN = targets.length - fails.length;
+    notify(`${act.label.replace("…", "")}: ${tn(okN, "{n} equipo", "{n} equipos")} OK${fails.length ? ` · ${t("{n} con error", { n: fails.length })}` : ""}`);
+    if (fails.length) setError(`${t("{n} equipo(s) con error:", { n: fails.length })}\n${fails.slice(0, 5).join("\n")}${fails.length > 5 ? "\n…" : ""}`);
+  };
+
   const copy = async (text: string, what: string) => {
     try {
       await navigator.clipboard.writeText(text);
@@ -715,6 +864,9 @@ export default function App() {
         <td key="name" onDoubleClick={() => h.name && copy(h.name, t("Nombre"))}>
           <DeviceIcon kind={deviceKind(h, infos.get(h.ip)?.info)} />
           {h.name || <span className="muted">—</span>}
+          {isStar(h) && <span className="star-mark" title={t("Equipo importante")}>★</span>}
+          {unknown.has(h.ip) && <span className="unk-mark" title={t("MAC no vista antes en esta red")}>❓</span>}
+          {conflicts.has(h.ip) && <span className="conf-mark" title={conflicts.get(h.ip)!.join("\n")}>⚡</span>}
           {getNote(h) && <span className="note-mark" title={noteText(h)}>📝</span>}
           {prevScan && !prevSet.has(h.ip) && (
             <span className="badge-nuevo" title={t("No estaba en el escaneo anterior")}>{t("Nuevo")}</span>
@@ -734,8 +886,17 @@ export default function App() {
         </td>
       ),
     },
+    {
+      key: "vendor",
+      label: t("Fabricante (MAC)"),
+      td: (h) => {
+        const v = h.mac ? vendorOf(h.mac) || (isRandomMac(h.mac) ? t("MAC privada (móvil/portátil)") : "") : "";
+        return <td key="vendor" title={v}>{v || <span className="muted">—</span>}</td>;
+      },
+    },
     { key: "user", label: t("Último usuario"), sort: "user", td: (h) => <td key="user" className="user" title={userOfHost(h)}>{infoCell(h, userOfHost(h) || null)}</td> },
     { key: "os", label: t("Sistema operativo"), sort: "os", td: (h) => <td key="os" className="os" title={osOf(h)}>{infoCell(h, osOf(h) || null, t("Sin acceso"))}</td> },
+    { key: "osver", label: t("Versión del SO"), td: (h) => <td key="osver" className="osver" title={osVersion(infos.get(h.ip)?.info)}>{infoCell(h, osVersion(infos.get(h.ip)?.info) || null)}</td> },
     { key: "ram", label: "RAM", sort: "ram", num: true, td: (h) => <td key="ram" className="num">{infoCell(h, ramOf(h) ? fmtRam(ramOf(h)) : null)}</td> },
     { key: "disk", label: t("Almacenamiento"), sort: "disk", td: (h) => <td key="disk">{diskCell(h)}</td> },
     { key: "ms", label: t("Latencia"), sort: "ms", num: true, td: (h) => <td key="ms" className="num">{h.ms != null ? `${h.ms} ms` : <span className="muted">—</span>}</td> },
@@ -795,8 +956,8 @@ export default function App() {
   return (
     <div className="app">
       <header className="toolbar">
-        <div className="brand clickable" onClick={() => setDialog("about")} title={t("Acerca de SGIIPP-IPSCANER")}>
-          <b>SGIIPP-IPSCANER</b>
+        <div className="brand clickable" onClick={() => setDialog("about")} title={t("Acerca de SGIIPP-IPSCANNER")}>
+          <b>SGIIPP-IPSCANNER</b>
           <span title={settings.localidad ? `${settings.centro} · ${settings.localidad}` : settings.centro}>
             {settings.centro}
           </span>
@@ -1005,7 +1166,7 @@ export default function App() {
         </div>
       </div>
 
-      {(alertCount > 0 || (prevScan && newCount > 0) || noAccessCount > 0) && !scanning && (
+      {(alertCount > 0 || (prevScan && newCount > 0) || noAccessCount > 0 || conflicts.size > 0 || starCount > 0 || unknown.size > 0) && !scanning && (
         <div className="summary" role="group" aria-label={t("Resumen")}>
           {alertCount > 0 && (
             <button className={"chip bad" + (onlyAlerts ? " on" : "")} onClick={() => setOnlyAlerts((v) => !v)} title={t("Mostrar solo estos equipos")}>
@@ -1015,6 +1176,26 @@ export default function App() {
           {prevScan && newCount > 0 && (
             <button className={"chip new" + (quick === "new" ? " on" : "")} onClick={() => setQuick((q) => (q === "new" ? "" : "new"))} title={t("Mostrar solo estos equipos")}>
               ★ {tn(newCount, "{n} equipo nuevo", "{n} equipos nuevos")}
+            </button>
+          )}
+          {starCount > 0 && (
+            <button className={"chip star" + (quick === "star" ? " on" : "")} onClick={() => setQuick((q) => (q === "star" ? "" : "star"))} title={t("Mostrar solo estos equipos")}>
+              ★ {tn(starCount, "{n} importante", "{n} importantes")}
+            </button>
+          )}
+          {unknown.size > 0 && (
+            <button className={"chip warn" + (quick === "unknown" ? " on" : "")} onClick={() => setQuick((q) => (q === "unknown" ? "" : "unknown"))} title={t("Equipos con una MAC que nunca se había visto. Pulsa para ver solo estos equipos.")}>
+              ❓ {tn(unknown.size, "{n} desconocido", "{n} desconocidos")}
+            </button>
+          )}
+          {quick === "unknown" && unknown.size > 0 && (
+            <button className="chip" onClick={() => markKnown([...hosts.values()].filter((h) => unknown.has(h.ip)))}>
+              ✓ {t("Marcar todos como conocidos")}
+            </button>
+          )}
+          {conflicts.size > 0 && (
+            <button className={"chip bad" + (quick === "conflict" ? " on" : "")} onClick={() => setQuick((q) => (q === "conflict" ? "" : "conflict"))} title={t("Posibles conflictos de red: MAC repetida o IP con otra MAC. Pulsa para ver solo estos equipos.")}>
+              ⚡ {tn(conflicts.size, "{n} posible conflicto", "{n} posibles conflictos")}
             </button>
           )}
           {noAccessCount > 0 && (
@@ -1049,6 +1230,25 @@ export default function App() {
           <button className="btn" disabled={!remote.rdp} onClick={() => bulkPower("reboot")} title={t("Reiniciar en 30 s")}>{t("Reiniciar")}</button>
           <button className="btn danger" disabled={!remote.rdp} onClick={() => bulkPower("shutdown")} title={t("Apagar en 30 s")}>{t("Apagar")}</button>
           <button className="btn" disabled={!remote.rdp} onClick={() => bulkPower("abort")} title={t("Cancelar apagado o reinicio pendiente")}>{t("Cancelar apagado")}</button>
+          <button
+            className="btn"
+            onClick={() => wake([...hosts.values()].filter((h) => marked.has(h.ip)))}
+            title={t("Enviar la orden de encendido (Wake-on-LAN) a los equipos marcados")}
+          >
+            {t("Encender")}
+          </button>
+          <button
+            className="btn"
+            disabled={!remote.rdp}
+            onClick={(e) => {
+              if (actMenu) return setActMenu(null);
+              const b = e.currentTarget.getBoundingClientRect();
+              setActMenu({ top: b.bottom + 6, left: Math.max(8, Math.min(b.left, window.innerWidth - 318)) });
+            }}
+            title={t("Ejecutar una acción en los equipos marcados")}
+          >
+            {t("Acciones")} ▾
+          </button>
           <button
             className="btn"
             onClick={() =>
@@ -1183,16 +1383,47 @@ export default function App() {
               <h2>{sel.name || sel.ip}</h2>
               <span className="muted mono">{sel.ip}</span>
             </div>
-            <button className="btn" onClick={() => setSelected(null)} title={t("Cerrar")}>✕</button>
+            <div className="d-btns">
+              <button className={"btn star-btn" + (isStar(sel) ? " on" : "")} onClick={() => toggleStar(sel)} title={isStar(sel) ? t("Quitar de importantes") : t("Marcar como importante")} aria-pressed={isStar(sel)}>
+                {isStar(sel) ? "★" : "☆"}
+              </button>
+              <button className="btn" onClick={() => copy(fichaText(sel), t("Ficha"))} title={t("Copiar ficha del equipo (para pegar en un ticket)")}>
+                {t("Copiar ficha")}
+              </button>
+              <button className="btn" onClick={() => setSelected(null)} title={t("Cerrar")}>✕</button>
+            </div>
           </div>
           <dl>
             <dt>MAC</dt>
             <dd className="mono">{sel.mac || "—"}</dd>
+            {sel.mac && (
+              <>
+                <dt>{t("Fabricante")}</dt>
+                <dd>{vendorOf(sel.mac) || (isRandomMac(sel.mac) ? t("MAC privada (móvil/portátil)") : <span className="muted">{t("Desconocido")}</span>)}</dd>
+              </>
+            )}
             <dt>{t("Latencia")}</dt>
             <dd>{sel.ms != null ? `${sel.ms} ms` : "—"}</dd>
             <dt>{t("Estado")}</dt>
             <dd>{sel.alive ? t("Responde a ping") : t("Solo en tabla ARP")}</dd>
           </dl>
+
+          {unknown.has(sel.ip) && (
+            <div className="d-sec conflict">
+              <h3>❓ {t("Equipo desconocido")}</h3>
+              <p className="small">{t("Esta MAC no se había visto nunca en esta red.")}</p>
+              <button className="btn" onClick={() => markKnown([sel])}>✓ {t("Marcar como conocido")}</button>
+            </div>
+          )}
+
+          {conflicts.has(sel.ip) && (
+            <div className="d-sec conflict">
+              <h3>⚡ {t("Aviso de red")}</h3>
+              {conflicts.get(sel.ip)!.map((m, i) => (
+                <p key={i} className="small">{m}</p>
+              ))}
+            </div>
+          )}
 
           <div className="d-sec notes" key={`${sel.ip}-${notesLoads}`}>
             <h3>{t("Notas")}</h3>
@@ -1330,6 +1561,24 @@ export default function App() {
                 {label}
               </li>
             ))}
+            <li
+              onClick={() => {
+                const h = menu.h;
+                setMenu(null);
+                copy(fichaText(h), t("Ficha"));
+              }}
+            >
+              {t("Copiar ficha")}
+            </li>
+            <li
+              onClick={() => {
+                const h = menu.h;
+                setMenu(null);
+                toggleStar(h);
+              }}
+            >
+              {isStar(menu.h) ? t("Quitar de importantes") : t("Marcar como importante")}
+            </li>
             <li className="sep" />
             {(
               [
@@ -1373,6 +1622,17 @@ export default function App() {
                 {label}
               </li>
             ))}
+            <li
+              className={menu.h.mac ? "" : "off"}
+              title={menu.h.mac ? "" : t("Este equipo no tiene MAC conocida")}
+              onClick={() => {
+                const h = menu.h;
+                setMenu(null);
+                if (h.mac) wake([h]);
+              }}
+            >
+              {t("Encender (Wake-on-LAN)")}
+            </li>
             <li className="sep" />
             <li
               onClick={() => {
@@ -1404,7 +1664,64 @@ export default function App() {
         <NewsDialog hideOnStart={hideNews} onHideChange={setHideNews} onClose={() => setDialog(null)} />
       )}
       {dialog === "about" && <AboutDialog onClose={() => setDialog(null)} onManual={() => setDialog("manual")} />}
-      {dialog === "compare" && <CompareDialog onClose={() => setDialog(null)} notify={notify} />}
+      {actMenu && (
+        <>
+          <div className="colmenu-bg" onClick={() => setActMenu(null)} />
+          <div className="colmenu" role="menu" style={{ top: actMenu.top, left: actMenu.left, width: 300 }}>
+            <b>{t("Acciones sobre los equipos marcados")}</b>
+            {ACTIONS.map((a) => (
+              <button
+                key={a.id}
+                className="btn view-apply"
+                onClick={() => {
+                  setActMenu(null);
+                  if (a.id === "msg") setMsgAsk("");
+                  else runAction(a.id);
+                }}
+              >
+                {a.label}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+      {msgAsk !== null && (
+        <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && setMsgAsk(null)}>
+          <div className="modal" role="dialog" aria-label={t("Enviar un mensaje al usuario…")} style={{ maxWidth: 440 }}>
+            <div className="modal-head">
+              <h2>{t("Enviar un mensaje al usuario…")}</h2>
+              <button className="btn" onClick={() => setMsgAsk(null)} title={t("Cerrar")}>✕</button>
+            </div>
+            <div className="modal-body">
+              <textarea
+                rows={4}
+                maxLength={200}
+                autoFocus
+                value={msgAsk}
+                onChange={(e) => setMsgAsk(e.target.value)}
+                placeholder={t("Texto del mensaje (máx. 200 caracteres)")}
+                style={{ width: "100%", boxSizing: "border-box", font: "inherit" }}
+              />
+            </div>
+            <div className="modal-foot">
+              <div className="spacer" />
+              <button className="btn" onClick={() => setMsgAsk(null)}>{t("Cancelar")}</button>
+              <button
+                className="btn primary"
+                disabled={!msgAsk.trim()}
+                onClick={() => {
+                  const text = msgAsk.trim();
+                  setMsgAsk(null);
+                  runAction("msg", text);
+                }}
+              >
+                {t("Enviar")}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {dialog === "compare" && <CompareDialog onClose={() => setDialog(null)} notify={notify} onWake={(l) => wake(l)} />}
       {dialog === "log" && <LogDialog onClose={() => setDialog(null)} notify={notify} />}
       {dialog === "manual" && <Manual onClose={() => setDialog(null)} />}
       {showSettings && (

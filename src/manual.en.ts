@@ -3,11 +3,11 @@ import type { Section } from "./manual.es";
 export const SECTIONS_EN: Section[] = [
   {
     id: "intro",
-    title: "What SGIIPP-IPSCANER is",
+    title: "What SGIIPP-IPSCANNER is",
     blocks: [
       {
         t: "p",
-        x: "SGIIPP-IPSCANER discovers the devices connected to a local network and shows each one's **name**, **IP address** and **MAC address**. On Windows computers it also reads the **operating system**, the **RAM** and the state of the **hard disks**, and warns when one is about to fill up.",
+        x: "SGIIPP-IPSCANNER discovers the devices connected to a local network and shows each one's **name**, **IP address** and **MAC address**. On Windows computers it also reads the **operating system**, the **RAM** and the state of the **hard disks**, and warns when one is about to fill up.",
       },
       {
         t: "ul",
@@ -36,6 +36,7 @@ export const SECTIONS_EN: Section[] = [
           "Press **Scan** (or the `F5` key). Devices appear in the table as they respond; the top bar and the percentage on the button show progress. **Stop** interrupts the scan.",
           "When it finishes, if «Check disks» is on, the application queries the system, RAM and disks of the active devices in the background (6 at a time). Meanwhile you will see pulsing grey bars in those cells.",
           "Click a device to open its **detail panel** on the right.",
+          "When the application opens, the devices from the **last scan** are shown (with its date, in a yellow notice) without querying them; press **Scan** to refresh them.",
         ],
       },
       { t: "h", x: "Supported range formats" },
@@ -87,7 +88,12 @@ export const SECTIONS_EN: Section[] = [
           "**Columns (▦):** show or hide columns, reorder them with ▲▼ and drag the right edge of a title to resize. It is remembered between sessions; «Reset columns» restores the default.",
           "**Clickable summary:** alerts appear under the bar (critical disks, new devices, no access); click one to see only those devices and click again to clear it.",
           "**☰ Views:** save the active filter, type and alerts under a name and bring them back with one click. Ready-made views are included: «Disks in red», «New since the previous scan», «No access», «Printers» and «Routers and network».",
+          "**OS version:** optional column (▦) with the Windows version in plain terms («23H2 · 22631», «2019 · 17763» on servers). It also appears in the PDF reports.",
           "**⇄ Compare scans:** the last 10 completed scans are kept. Pick two and you will see new devices, devices that no longer appear and IP or name changes (devices are matched by MAC). It can be exported to CSV.",
+          "**⚡ Possible network conflicts:** after a scan, the summary warns if the same MAC answers on several IPs (device with duplicate IPs or several interfaces) or if an IP had another MAC in the previous scan (device replaced or two devices with the same IP). Affected devices carry ⚡ next to the name and the detail panel explains why. It is a warning, not a certainty: a router with several IPs or a device with several network cards also triggers it.",
+          "**★ Important:** click the star in the detail panel (or right-click → Mark as important) to highlight a device; the summary lets you filter only the important ones. They are remembered by MAC.",
+          "**❓ Unknown devices:** after the first scan, any MAC that had not been seen before is flagged as unknown (summary, ❓ next to the name and a notice in the detail panel). Click “Mark as known” to accept it. With auto-scan you get an alert when one appears.",
+          "**Vendor by MAC and Copy device sheet:** the optional “Vendor (MAC)” column and the detail panel show the vendor (partial list of the most common ones; private phone MACs are labelled as such). “Copy device sheet” puts all the device data on the clipboard to paste into a ticket.",
           "**↻ Recheck:** queries system, RAM and disks of all devices again without repeating the scan.",
         ],
       },
@@ -166,7 +172,7 @@ export const SECTIONS_EN: Section[] = [
         t: "ul",
         x: [
           "The device must be **Windows** and switched on.",
-          "The user running SGIIPP-IPSCANER must be a **local administrator** of the queried device (for example, a domain administrator or the support group).",
+          "The user running SGIIPP-IPSCANNER must be a **local administrator** of the queried device (for example, a domain administrator or the support group).",
           "The device's firewall must allow **WMI** («Windows Management Instrumentation») and **RPC** (TCP 135 and dynamic ports).",
           "The **computer name** is used when known, because with domain Kerberos authentication it is more reliable than the IP.",
         ],
@@ -226,7 +232,7 @@ export const SECTIONS_EN: Section[] = [
       },
       {
         t: "p",
-        x: "When devices are ticked a bar appears with: **Reboot**, **Shut down**, **Cancel shutdown** and **Copy IPs**. Reboot and shut down ask for confirmation (with the list of devices) and run **after 30 seconds** with your Windows user, who must be an administrator of those devices. This computer is always excluded. If any fails, which one and why is shown, and it is written to the log.",
+        x: "When devices are ticked a bar appears with: **Reboot**, **Shut down**, **Cancel shutdown**, **Power on**, **Actions** and **Copy IPs**. Reboot and shut down ask for confirmation (with the list of devices) and run **after 30 seconds** with your Windows user, who must be an administrator of those devices. This computer is always excluded. If any fails, which one and why is shown, and it is written to the log.",
       },
     ],
   },
@@ -249,8 +255,30 @@ export const SECTIONS_EN: Section[] = [
           ["Continuous ping", "Opens a console with `ping -t` to that device. Close it to stop."],
           ["Reboot / Shut down device…", "Asks for confirmation and schedules the action **in 30 seconds** with your Windows user (needs administrator permissions on the device)."],
           ["Cancel shutdown/reboot", "Cancels a pending shutdown or reboot during those 30 seconds."],
+          ["Power on (Wake-on-LAN)", "Sends the power-on packet to the device's MAC. The device needs Wake-on-LAN enabled in the BIOS and network card, and must be on the same network (or allow directed broadcast). From ⇄ Compare scans you can power on the ones that «no longer appear»."],
         ],
       },
+    ],
+  },
+  {
+    id: "acciones",
+    title: "Actions on several devices",
+    blocks: [
+      {
+        t: "p",
+        x: "With devices ticked, the **Actions ▾** button in the selection bar offers a closed list of tasks. All of them ask for confirmation with the list of devices, run 5 at a time with your Windows user (who must be an administrator of those devices) and are written to the log, with the error of every device that fails.",
+      },
+      {
+        t: "table",
+        head: ["Action", "What it does"],
+        rows: [
+          ["Update policies", "Runs `gpupdate /force` on the remote device."],
+          ["Flush the DNS cache", "Runs `ipconfig /flushdns`."],
+          ["Restart the print spooler", "Stops and starts the *spooler* service (useful with stuck print jobs)."],
+          ["Send a message to the user", "Shows a message (up to 200 characters) on the user's screen with `msg.exe`."],
+        ],
+      },
+      { t: "note", x: "Commands are launched through WMI without a window: you can tell whether the device accepted them, but you do not see their output. They need WMI/RPC open, just like the detail query." },
     ],
   },
   {
@@ -326,6 +354,8 @@ export const SECTIONS_EN: Section[] = [
           ["Ctrl+F", "Go to the filter box"],
           ["↑  ↓", "Change device (opens its panel)"],
           ["Enter", "Open the panel of the focused row"],
+          ["Ctrl+A", "Select all visible devices"],
+          ["Ctrl+I", "Invert the selection among visible devices"],
           ["Esc", "Clear the filter, close the menu, the window or the panel (in that order)"],
           ["Right-click", "Row action menu"],
           ["Double-click", "Copy the value of a cell or field"],
@@ -363,7 +393,7 @@ export const SECTIONS_EN: Section[] = [
       {
         t: "ul",
         x: [
-          "SGIIPP-IPSCANER works **entirely on your computer**: it sends no data to the Internet or to any server.",
+          "SGIIPP-IPSCANNER works **entirely on your computer**: it sends no data to the Internet or to any server.",
           "Alternative credentials are only kept in memory during the session and never written to disk.",
           "Reports and CSV files contain names, addresses and device data. Store and share them according to your organisation's security rules.",
           "Scan only networks you are authorised to scan.",
@@ -375,12 +405,14 @@ export const SECTIONS_EN: Section[] = [
     id: "acerca",
     title: "About",
     blocks: [
-      { t: "p", x: `**SGIIPP-IPSCANER** · version ${__APP_VERSION__}` },
+      { t: "p", x: `**SGIIPP-IPSCANNER** · version ${__APP_VERSION__}` },
       {
         t: "p",
         x: "The version number follows the **MAJOR.MINOR.PATCH** format: the **patch** goes up when fixing bugs, the **minor** when adding new features and, every 10 minor versions, the **major** goes up.",
       },
       { t: "p", x: "Created by the **Servicio de Informática CIS Guillermo Miranda de Murcia**. Click the application name (top left) to see the credits." },
+      { t: "p", x: "**New version notice:** on startup the program checks GitHub (`marianoog1969/SGIIPP-IPSCANNER`) for a newer version; if there is one, a **⬆ vX.Y.Z** button appears on the toolbar and clicking it opens the download. It shows nothing without an Internet connection." },
+      { t: "p", x: "**♥ Donate:** the heart button (top bar and «About») opens the PayPal link to support the project." },
       { t: "p", x: "Desktop application for Windows built with Tauri 2, Rust and React. Click the version number in the footer to see the latest news. To read this manual at any time press `F1` or the **?** button." },
     ],
   },

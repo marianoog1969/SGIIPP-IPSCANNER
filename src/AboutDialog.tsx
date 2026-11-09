@@ -11,7 +11,7 @@ export default function AboutDialog({ onClose, onManual }: { onClose: () => void
           <button className="btn" onClick={onClose} title={t("Cerrar (Esc)")}>✕</button>
         </div>
         <div className="modal-body about">
-          <h3>SGIIPP-IPSCANER</h3>
+          <h3>SGIIPP-IPSCANNER</h3>
           <p className="muted">{t("Versión")} {__APP_VERSION__}</p>
           <p>{t("Escáner de red: equipos, direcciones IP y MAC, sistema operativo, RAM, discos y último usuario, con informes PDF.")}</p>
           <dl>

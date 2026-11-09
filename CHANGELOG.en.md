@@ -1,4 +1,24 @@
-# SGIIPP-IPSCANER · Version history
+# SGIIPP-IPSCANNER · Version history
+
+## 2.9.0 · 2026-11-05
+- New: **★ important devices** (star in the detail panel and context menu, summary filter and built-in view).
+- New: **❓ unknown devices**: alert for a never-seen MAC (after the first scan), “Mark as known” and an alert on auto-scan.
+- New: **vendor by MAC** (optional column and detail panel; partial list) and private-MAC detection.
+- New: **Copy device sheet** to the clipboard, to paste into a ticket.
+
+## 2.8.0 · 2026-11-04
+- New: **possible network conflict detection**: same MAC on several IPs, or an IP that used to have another MAC. Clickable notice in the summary, ⚡ next to the name and an explanation in the detail panel.
+
+## 2.7.1 · 2026-11-04
+- Manual: added the last scan on startup, the new version notice, the Donate button and the Ctrl+A / Ctrl+I shortcuts.
+
+## 2.7.0 · 2026-11-04
+- New: **Wake-on-LAN**: power on devices from the right-click menu, the selection bar or «Compare scans» (the ones that no longer appear).
+- New: **Actions on several devices** (selection bar → Actions): update policies, flush DNS, restart the print spooler and send a message to the user. Closed list, with confirmation and logging.
+- New: **OS version** column (e.g. «23H2 · 22631»), also in the PDF reports.
+
+## 2.6.1 · 2026-11-04
+- Changed: the program and its executable are now called **SGIIPP-IPSCANNER** (two N). The data folder (log and notes) does not change.
 
 ## 2.6.0 · 2026-11-02
 - New: **per-device history** in the detail panel (first and last seen, previous names and IPs), tied to the MAC.

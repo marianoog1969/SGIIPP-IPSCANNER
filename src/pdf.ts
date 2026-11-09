@@ -397,7 +397,7 @@ export function generateReport(o: ReportOptions): Uint8Array {
     doc.line(ML, fy - 10, W - MR, fy - 10);
     doc.setFont("helvetica", "normal").setFontSize(8);
     text(doc, GRIS_CLARO);
-    doc.text(`${t("Generado con")} SGIIPP-IPSCANER v${__APP_VERSION__} · ${fechaHora(now)}`, ML, fy);
+    doc.text(`${t("Generado con")} SGIIPP-IPSCANNER v${__APP_VERSION__} · ${fechaHora(now)}`, ML, fy);
     doc.text(`${t("Pág.")} ${p - 1}`, W - MR, fy, { align: "right" });
   }
 

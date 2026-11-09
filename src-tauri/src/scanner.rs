@@ -113,6 +113,22 @@ fn parse_one(s: &str) -> Result<Vec<Ipv4Addr>, String> {
     Ok((start..=end).map(Ipv4Addr::from).collect())
 }
 
+/// Paquete mágico de Wake-on-LAN: 6 bytes 0xFF + 16 veces la MAC (102 bytes).
+pub fn magic_packet(mac: &str) -> Result<Vec<u8>, String> {
+    let hex: Vec<u8> = mac
+        .split(|c| c == ':' || c == '-')
+        .map(|p| u8::from_str_radix(p.trim(), 16).map_err(|_| format!("MAC no válida: {mac}")))
+        .collect::<Result<_, _>>()?;
+    if hex.len() != 6 {
+        return Err(format!("MAC no válida: {mac}"));
+    }
+    let mut v = vec![0xFFu8; 6];
+    for _ in 0..16 {
+        v.extend_from_slice(&hex);
+    }
+    Ok(v)
+}
+
 // ───────────────────────── Interfaces locales ─────────────────────────
 
 pub fn networks() -> Vec<Network> {
@@ -872,6 +888,17 @@ mod tests {
         assert!(parse_range("hola").is_err());
         assert_eq!(parse_range("10.0.0.1-3, 10.0.1.0/30; 10.0.0.2").unwrap().len(), 5);
         assert!(parse_range(" , ").is_err());
+    }
+
+    #[test]
+    fn paquete_wol() {
+        let p = magic_packet("aa-bb-cc-dd-ee-0f").unwrap();
+        assert_eq!(p.len(), 102);
+        assert_eq!(&p[..6], &[0xFF; 6]);
+        assert_eq!(&p[6..12], &[0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0x0F]);
+        assert_eq!(&p[96..102], &[0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0x0F]);
+        assert!(magic_packet("hola").is_err());
+        assert!(magic_packet("aa:bb:cc").is_err());
     }
 
     #[test]

@@ -366,3 +366,15 @@ ul.cmp { margin: 4px 0 0; padding-left: 18px; font-size: 13px; }
 ul.cmp li { margin: 2px 0; font-family: Consolas, monospace; }
 
 .news-date { font-weight: 400; color: var(--muted); font-size: 13px; }
+
+.conf-mark { margin-left: 6px; color: var(--danger); font-size: 12px; }
+.d-sec.conflict p { margin: 4px 0; color: var(--danger); }
+
+.star-mark { margin-left: 6px; color: #d99a00; font-size: 12px; }
+.unk-mark { margin-left: 4px; font-size: 11px; }
+.d-btns { display: flex; gap: 6px; align-items: center; flex-shrink: 0; }
+.star-btn { font-size: 15px; line-height: 1; padding: 4px 8px; }
+.star-btn.on { color: #d99a00; }
+.chip.star { color: #9a6b00; border-color: #e6c46a; background: #fff8e1; }
+.chip.star.on { background: #d99a00; color: #fff; border-color: #d99a00; }
+.d-sec.conflict .btn { margin-top: 6px; }

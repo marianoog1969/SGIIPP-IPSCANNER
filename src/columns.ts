@@ -1,6 +1,7 @@
 import { t } from "./i18n";
 import { getNote } from "./notes";
-import { Host, Info, kindLabel, deviceKind, userOf, diskText, fmtRam, fmtUptime, shortOs } from "./lib";
+import { vendorOf } from "./oui";
+import { Host, Info, osVersion, kindLabel, deviceKind, userOf, diskText, fmtRam, fmtUptime, shortOs } from "./lib";
 
 export interface Row {
   h: Host;
@@ -24,8 +25,10 @@ export const COLS: Col[] = [
   { key: "nombre", label: "Nombre del equipo", group: "lista", get: (r) => r.h.name || dash },
   { key: "ip", label: "Dirección IP", group: "lista", get: (r) => r.h.ip },
   { key: "mac", label: "Dirección MAC", group: "lista", get: (r) => r.h.mac || dash },
+  { key: "fabmac", label: "Fabricante (MAC)", group: "ficha", get: (r) => (r.h.mac && vendorOf(r.h.mac)) || dash },
   { key: "usuario", label: "Último usuario", group: "lista", get: (r) => userOf(r.info) || dash },
   { key: "os", label: "Sistema operativo", group: "lista", get: (r) => shortOs(r.info?.os) || dash },
+  { key: "sover", label: "Versión del SO", group: "lista", get: (r) => osVersion(r.info) || dash },
   {
     key: "ram",
     label: "RAM",

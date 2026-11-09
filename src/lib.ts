@@ -161,3 +161,19 @@ export function deviceKind(h: Host, info?: Info | null): DeviceKind {
 }
 
 export const kindLabel = (k: DeviceKind) => t(KIND_LABEL[k]);
+
+const WIN_CLIENT: Record<number, string> = {
+  10240: "1507", 10586: "1511", 14393: "1607", 15063: "1703", 16299: "1709", 17134: "1803", 17763: "1809",
+  18362: "1903", 18363: "1909", 19041: "2004", 19042: "20H2", 19043: "21H1", 19044: "21H2", 19045: "22H2",
+  22000: "21H2", 22621: "22H2", 22631: "23H2", 26100: "24H2", 26200: "25H2",
+};
+const WIN_SERVER: Record<number, string> = { 14393: "2016", 17763: "2019", 20348: "2022", 26100: "2025" };
+
+/** Versión de Windows legible: «23H2 · 22631» (cliente) o «2019 · 17763» (servidor). */
+export const osVersion = (i?: Info | null): string => {
+  if (!i || !i.os) return "";
+  const b = parseInt(i.build || (i.version ?? "").split(".")[2] || "", 10);
+  if (!b) return i.version ?? "";
+  const label = /server/i.test(i.os) ? WIN_SERVER[b] : WIN_CLIENT[b];
+  return label ? `${label} · ${b}` : `build ${b}`;
+};

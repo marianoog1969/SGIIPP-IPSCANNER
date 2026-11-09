@@ -236,7 +236,7 @@ fn open_remote_blocking(
                         "/t".into(),
                         "30".into(),
                         "/c".into(),
-                        "Solicitado desde SGIIPP-IPSCANER. Se ejecutará en 30 segundos.".into(),
+                        "Solicitado desde SGIIPP-IPSCANNER. Se ejecutará en 30 segundos.".into(),
                     ],
                 )
                 .map(|_| ())
@@ -338,6 +338,77 @@ fn open_url(url: String) -> Result<(), String> {
     }
 }
 
+/// Wake-on-LAN: envía el paquete mágico por difusión (global y de la subred /24 del equipo).
+fn wol_blocking(mac: String, ip: Option<String>) -> Result<(), String> {
+    use std::net::{Ipv4Addr, UdpSocket};
+    let pkt = scanner::magic_packet(&mac)?;
+    let sock = UdpSocket::bind("0.0.0.0:0").map_err(|e| format!("No se pudo abrir el socket: {e}"))?;
+    sock.set_broadcast(true).map_err(|e| format!("No se pudo activar la difusión: {e}"))?;
+    let mut dest: Vec<String> = vec!["255.255.255.255:9".into(), "255.255.255.255:7".into()];
+    if let Some(ip) = ip.and_then(|i| i.parse::<Ipv4Addr>().ok()) {
+        let o = ip.octets();
+        dest.push(format!("{}.{}.{}.255:9", o[0], o[1], o[2]));
+    }
+    let sent = dest.iter().filter(|d| sock.send_to(&pkt, d.as_str()).is_ok()).count();
+    logger::log("INFO", &format!("Wake-on-LAN a {mac}: {sent}/{} envíos", dest.len()));
+    if sent == 0 {
+        Err("No se pudo enviar el paquete de encendido".into())
+    } else {
+        Ok(())
+    }
+}
+
+#[tauri::command]
+async fn wake_on_lan(mac: String, ip: Option<String>) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || wol_blocking(mac, ip))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// Acciones remotas permitidas (lista cerrada). Se ejecutan con el usuario de Windows actual.
+fn run_action_blocking(action: String, ip: String, text: Option<String>) -> Result<String, String> {
+    let ip: std::net::Ipv4Addr = ip.parse().map_err(|_| "IP no válida".to_string())?;
+    #[cfg(not(windows))]
+    {
+        let _ = (action, ip, text);
+        Err("Solo disponible en Windows".into())
+    }
+    #[cfg(windows)]
+    {
+        logger::log("INFO", &format!("Acción remota {action} en {ip}"));
+        if action == "msg" {
+            let t: String = text
+                .unwrap_or_default()
+                .chars()
+                .filter(|c| !c.is_control())
+                .take(200)
+                .collect();
+            if t.trim().is_empty() {
+                return Err("El mensaje está vacío".into());
+            }
+            return run_cmd("msg", &["*".into(), format!("/server:{ip}"), "/time:300".into(), t]);
+        }
+        let cmd = match action.as_str() {
+            "gpupdate" => "cmd /c gpupdate /force",
+            "flushdns" => "cmd /c ipconfig /flushdns",
+            "spooler" => "cmd /c net stop spooler && net start spooler",
+            _ => return Err("Acción desconocida".into()),
+        };
+        let script = format!(
+            "$r = Invoke-WmiMethod -ComputerName '{ip}' -Class Win32_Process -Name Create -ArgumentList '{cmd}'; \
+             if ($r.ReturnValue -ne 0) {{ throw \"Win32_Process.Create devolvió $($r.ReturnValue)\" }}"
+        );
+        run_cmd("powershell.exe", &["-NoProfile".into(), "-NonInteractive".into(), "-Command".into(), script])
+    }
+}
+
+#[tauri::command]
+async fn run_action(action: String, ip: String, text: Option<String>) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || run_action_blocking(action, ip, text))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
 #[tauri::command]
 fn open_log_dir() -> Result<(), String> {
     #[cfg(windows)]
@@ -383,7 +454,7 @@ pub fn run() {
     let crashed = logger::mark_start();
     logger::log(
         "INFO",
-        &format!("Inicio de SGIIPP-IPSCANER v{} ({})", env!("CARGO_PKG_VERSION"), std::env::consts::OS),
+        &format!("Inicio de SGIIPP-IPSCANNER v{} ({})", env!("CARGO_PKG_VERSION"), std::env::consts::OS),
     );
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -402,7 +473,9 @@ pub fn run() {
             open_log_dir,
             open_url,
             notes_load,
-            notes_save
+            notes_save,
+            wake_on_lan,
+            run_action
         ])
         .build(tauri::generate_context!())
         .unwrap_or_else(|e| {

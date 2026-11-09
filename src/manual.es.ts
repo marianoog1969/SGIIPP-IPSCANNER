@@ -16,11 +16,11 @@ export interface Section {
 export const SECTIONS_ES: Section[] = [
   {
     id: "intro",
-    title: "Qué es SGIIPP-IPSCANER",
+    title: "Qué es SGIIPP-IPSCANNER",
     blocks: [
       {
         t: "p",
-        x: "SGIIPP-IPSCANER descubre los equipos conectados a una red local y muestra de cada uno su **nombre**, su **dirección IP** y su **dirección MAC**. En los equipos Windows consulta además el **sistema operativo**, la **memoria RAM** y el estado de los **discos duros**, y avisa cuando alguno está a punto de llenarse.",
+        x: "SGIIPP-IPSCANNER descubre los equipos conectados a una red local y muestra de cada uno su **nombre**, su **dirección IP** y su **dirección MAC**. En los equipos Windows consulta además el **sistema operativo**, la **memoria RAM** y el estado de los **discos duros**, y avisa cuando alguno está a punto de llenarse.",
       },
       {
         t: "ul",
@@ -49,6 +49,7 @@ export const SECTIONS_ES: Section[] = [
           "Pulsa **Escanear** (o la tecla `F5`). Los equipos van apareciendo en la tabla a medida que responden; la barra superior y el porcentaje del botón indican el avance. Con **Detener** puedes interrumpir el escaneo.",
           "Al terminar, si «Comprobar discos» está activado, la aplicación consulta en segundo plano el sistema, la RAM y los discos de los equipos activos (6 a la vez). Mientras tanto verás barras grises pulsantes en esas celdas.",
           "Haz clic en un equipo para abrir su **ficha** en el panel derecho.",
+          "Al abrir la aplicación se muestran los equipos del **último escaneo** (con su fecha, en un aviso amarillo) sin consultarlos; pulsa **Escanear** para actualizarlos.",
         ],
       },
       { t: "h", x: "Formatos de rango admitidos" },
@@ -100,7 +101,12 @@ export const SECTIONS_ES: Section[] = [
           "**Columnas (▦):** muestra u oculta columnas, cámbialas de orden con ▲▼ y arrastra el borde derecho de un título para ensanchar. Se recuerda entre sesiones; «Restablecer columnas» vuelve a lo normal.",
           "**Resumen clicable:** bajo la barra aparecen avisos (discos críticos, equipos nuevos, sin acceso); pulsa uno para ver solo esos equipos y otra vez para quitarlo.",
           "**☰ Vistas:** guarda el filtro, el tipo y los avisos activos con un nombre y recupéralos con un clic. Incluye vistas listas: «Discos en rojo», «Nuevos desde el escaneo anterior», «Sin acceso», «Impresoras» y «Routers y red».",
+          "**Versión del SO:** columna opcional (▦) con la versión de Windows en claro («23H2 · 22631», «2019 · 17763» en servidores). También sale en los informes PDF.",
           "**⇄ Comparar escaneos:** se guardan los últimos 10 escaneos completados. Elige dos y verás los equipos nuevos, los que ya no aparecen y los cambios de IP o de nombre (los equipos se emparejan por MAC). Se puede exportar a CSV.",
+          "**⚡ Posibles conflictos de red:** tras un escaneo, el resumen avisa si una misma MAC responde en varias IP (equipo con IP duplicadas o varias interfaces) o si una IP tenía en el escaneo anterior otra MAC (equipo cambiado o dos equipos con la misma IP). Los equipos afectados llevan ⚡ junto al nombre y la ficha explica el motivo. Es un aviso, no una certeza: un router con varias IP o un equipo con varias tarjetas también lo provoca.",
+          "**★ Importantes:** pulsa la estrella de la ficha (o clic derecho → Marcar como importante) para destacar un equipo; el resumen permite filtrar solo los importantes. Se recuerdan por MAC.",
+          "**❓ Equipos desconocidos:** tras el primer escaneo, cualquier MAC que no se hubiera visto antes se marca como desconocida (resumen, ❓ junto al nombre y aviso en la ficha). Pulsa «Marcar como conocido» para aceptarla. Con el escaneo automático se avisa al aparecer uno.",
+          "**Fabricante por MAC y Copiar ficha:** la columna opcional «Fabricante (MAC)» y la ficha muestran el fabricante (lista parcial de los más comunes; las MAC privadas de móviles se indican como tales). «Copiar ficha» deja en el portapapeles todos los datos del equipo para pegarlos en un ticket.",
           "**↻ Recomprobar:** vuelve a consultar sistema, RAM y discos de todos los equipos sin repetir el escaneo.",
         ],
       },
@@ -179,7 +185,7 @@ export const SECTIONS_ES: Section[] = [
         t: "ul",
         x: [
           "El equipo debe ser **Windows** y estar encendido.",
-          "El usuario con el que ejecutas SGIIPP-IPSCANER debe ser **administrador local** del equipo consultado (por ejemplo, un administrador de dominio o el grupo de soporte).",
+          "El usuario con el que ejecutas SGIIPP-IPSCANNER debe ser **administrador local** del equipo consultado (por ejemplo, un administrador de dominio o el grupo de soporte).",
           "El cortafuegos del equipo debe permitir **WMI** («Instrumental de administración de Windows») y **RPC** (TCP 135 y puertos dinámicos).",
           "Se consulta por **nombre de equipo** cuando se conoce, porque con la autenticación Kerberos de dominio es más fiable que por IP.",
         ],
@@ -239,7 +245,7 @@ export const SECTIONS_ES: Section[] = [
       },
       {
         t: "p",
-        x: "Al marcar equipos aparece una barra con: **Reiniciar**, **Apagar**, **Cancelar apagado** y **Copiar IPs**. Reiniciar y apagar piden confirmación (con la lista de equipos) y se ejecutan **a los 30 segundos** con tu usuario de Windows, que debe ser administrador de esos equipos. Este propio equipo se excluye siempre. Si alguno falla, se indica cuál y el motivo, y queda en el registro.",
+        x: "Al marcar equipos aparece una barra con: **Reiniciar**, **Apagar**, **Cancelar apagado**, **Encender**, **Acciones** y **Copiar IPs**. Reiniciar y apagar piden confirmación (con la lista de equipos) y se ejecutan **a los 30 segundos** con tu usuario de Windows, que debe ser administrador de esos equipos. Este propio equipo se excluye siempre. Si alguno falla, se indica cuál y el motivo, y queda en el registro.",
       },
     ],
   },
@@ -262,8 +268,30 @@ export const SECTIONS_ES: Section[] = [
           ["Ping continuo", "Abre una consola con `ping -t` a ese equipo. Ciérrala para pararlo."],
           ["Reiniciar / Apagar equipo…", "Pide confirmación y programa la acción **en 30 segundos** con tu usuario de Windows (necesita permisos de administrador en el equipo)."],
           ["Cancelar apagado/reinicio", "Anula un apagado o reinicio pendiente durante esos 30 segundos."],
+          ["Encender (Wake-on-LAN)", "Envía el paquete de encendido a la MAC del equipo. El equipo debe tener activado Wake-on-LAN en BIOS y tarjeta de red, y estar en la misma red (o permitir difusión dirigida). Desde ⇄ Comparar escaneos puedes encender los que «ya no aparecen»."],
         ],
       },
+    ],
+  },
+  {
+    id: "acciones",
+    title: "Acciones en varios equipos",
+    blocks: [
+      {
+        t: "p",
+        x: "Con equipos marcados, el botón **Acciones ▾** de la barra de selección ofrece una lista cerrada de tareas. Todas piden confirmación con la lista de equipos, se ejecutan de 5 en 5 con tu usuario de Windows (que debe ser administrador de esos equipos) y quedan anotadas en el registro, con el error de cada equipo que falle.",
+      },
+      {
+        t: "table",
+        head: ["Acción", "Qué hace"],
+        rows: [
+          ["Actualizar directivas", "Ejecuta `gpupdate /force` en el equipo remoto."],
+          ["Vaciar la caché DNS", "Ejecuta `ipconfig /flushdns`."],
+          ["Reiniciar la cola de impresión", "Para y arranca el servicio *spooler* (útil con impresiones atascadas)."],
+          ["Enviar un mensaje al usuario", "Muestra un mensaje (hasta 200 caracteres) en la pantalla del usuario con `msg.exe`."],
+        ],
+      },
+      { t: "note", x: "Las órdenes se lanzan por WMI sin ventana: se sabe si el equipo las aceptó, pero no se ve su salida. Necesitan WMI/RPC abiertos, igual que la consulta de la ficha." },
     ],
   },
   {
@@ -339,6 +367,8 @@ export const SECTIONS_ES: Section[] = [
           ["Ctrl+F", "Ir al cuadro de filtro"],
           ["↑  ↓", "Cambiar de equipo (abre su ficha)"],
           ["Intro", "Abrir la ficha de la fila enfocada"],
+          ["Ctrl+A", "Marcar todos los equipos visibles"],
+          ["Ctrl+I", "Invertir la selección entre los equipos visibles"],
           ["Esc", "Borrar el filtro, cerrar el menú, la ventana o el panel (por ese orden)"],
           ["Clic derecho", "Menú de acciones de la fila"],
           ["Doble clic", "Copiar el valor de una celda o dato"],
@@ -376,7 +406,7 @@ export const SECTIONS_ES: Section[] = [
       {
         t: "ul",
         x: [
-          "SGIIPP-IPSCANER funciona **íntegramente en tu equipo**: no envía datos a Internet ni a ningún servidor.",
+          "SGIIPP-IPSCANNER funciona **íntegramente en tu equipo**: no envía datos a Internet ni a ningún servidor.",
           "Las credenciales alternativas solo se mantienen en memoria durante la sesión y nunca se escriben en disco.",
           "Los informes y los CSV contienen nombres, direcciones y datos de equipos. Guárdalos y compártelos según las normas de seguridad de tu organización.",
           "Escanea solo redes sobre las que tengas autorización.",
@@ -388,12 +418,14 @@ export const SECTIONS_ES: Section[] = [
     id: "acerca",
     title: "Acerca de",
     blocks: [
-      { t: "p", x: `**SGIIPP-IPSCANER** · versión ${__APP_VERSION__}` },
+      { t: "p", x: `**SGIIPP-IPSCANNER** · versión ${__APP_VERSION__}` },
       {
         t: "p",
         x: "El número de versión sigue el formato **MAYOR.MENOR.PARCHE**: el **parche** sube al corregir errores, el **menor** al añadir novedades y, cada 10 versiones menores, sube el **mayor**.",
       },
       { t: "p", x: "Creado por el **Servicio de Informática CIS Guillermo Miranda de Murcia**. Pulsa el nombre de la aplicación (arriba a la izquierda) para ver los créditos." },
+      { t: "p", x: "**Aviso de versión nueva:** al abrir, el programa consulta en GitHub (`marianoog1969/SGIIPP-IPSCANNER`) si hay una versión más reciente; si la hay, aparece el botón **⬆ vX.Y.Z** en la barra y al pulsarlo se abre la descarga. Sin conexión a Internet no muestra nada." },
+      { t: "p", x: "**♥ Donar:** el botón del corazón (barra superior y «Acerca de») abre el enlace de PayPal para apoyar el proyecto." },
       { t: "p", x: "Aplicación de escritorio para Windows desarrollada con Tauri 2, Rust y React. Pulsa el número de versión del pie para ver las últimas novedades. Para consultar este manual en cualquier momento pulsa `F1` o el botón **?**." },
     ],
   },

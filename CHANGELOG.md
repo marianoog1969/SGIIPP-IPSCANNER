@@ -1,4 +1,4 @@
-# SGIIPP-IPSCANER · Historial de versiones
+# SGIIPP-IPSCANNER · Historial de versiones
 
 ## Reglas de versionado (MAYOR.MENOR.PARCHE)
 
@@ -13,6 +13,26 @@ npm run version:patch    # errores
 npm run version:minor    # novedades
 npm run version:major    # cambio mayor
 ```
+
+## 2.9.0 · 2026-11-05
+- Novedad: **★ equipos importantes** (estrella en la ficha y en el menú contextual, filtro en el resumen y vista predefinida).
+- Novedad: **❓ equipos desconocidos**: aviso de MAC nunca vista (tras el primer escaneo), «Marcar como conocido» y aviso en el escaneo automático.
+- Novedad: **fabricante por MAC** (columna opcional y ficha; lista parcial) y detección de MAC privadas.
+- Novedad: **Copiar ficha** del equipo al portapapeles, para pegar en un ticket.
+
+## 2.8.0 · 2026-11-04
+- Nuevo: **detección de posibles conflictos de red**: misma MAC en varias IP, o una IP que antes tenía otra MAC. Aviso clicable en el resumen, ⚡ junto al nombre y explicación en la ficha.
+
+## 2.7.1 · 2026-11-04
+- Manual: añadidos el último escaneo al abrir, el aviso de versión nueva, el botón Donar y los atajos Ctrl+A / Ctrl+I.
+
+## 2.7.0 · 2026-11-04
+- Nuevo: **Wake-on-LAN**: encender equipos desde el clic derecho, la barra de selección o «Comparar escaneos» (los que ya no aparecen).
+- Nuevo: **Acciones en varios equipos** (barra de selección → Acciones): actualizar directivas, vaciar DNS, reiniciar la cola de impresión y enviar un mensaje al usuario. Lista cerrada, con confirmación y registro.
+- Nuevo: columna **Versión del SO** (por ejemplo «23H2 · 22631»), también en los informes PDF.
+
+## 2.6.1 · 2026-11-04
+- Cambiado: el programa y su ejecutable pasan a llamarse **SGIIPP-IPSCANNER** (con dos N). La carpeta de datos (registro y notas) no cambia.
 
 ## 2.6.0 · 2026-11-02
 - Nuevo: **historial por equipo** en la ficha (primera y última vez visto, nombres e IP anteriores), asociado a la MAC.
@@ -114,7 +134,7 @@ npm run version:major    # cambio mayor
 - Añadido el número de versión (pie de la ventana, informes PDF y manual).
 
 ## 0.9.0
-- Renombrada la aplicación a **SGIIPP-IPSCANER**.
+- Renombrada la aplicación a **SGIIPP-IPSCANNER**.
 
 ## 0.8.0
 - Informes PDF con el estilo institucional del CIS (portada, síntesis ejecutiva, índice, apartados).

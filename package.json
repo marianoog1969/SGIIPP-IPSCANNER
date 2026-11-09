@@ -1,7 +1,7 @@
 {
-  "name": "sgiipp-ipscaner",
+  "name": "sgiipp-ipscanner",
   "private": true,
-  "version": "2.6.0",
+  "version": "2.9.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
