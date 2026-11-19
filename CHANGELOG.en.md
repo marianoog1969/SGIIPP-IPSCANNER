@@ -1,5 +1,15 @@
 # SGIIPP-IPSCANNER · Version history
 
+## 3.0.0 · 2026-11-19
+- New: **extended device sheet** with antivirus, BitLocker status per drive, latest installed patch and an **Installed software** button (filterable, copyable list).
+- New: **open ports** (13 common ports): button in the detail panel and in the selection bar, optional column, and data in the PDF report and Excel.
+- New: **Export Excel** (.xlsx) with all devices and columns, and a disks sheet with colour coding.
+- New optional report columns: Antivirus, BitLocker, Latest patch and Open ports.
+- Fix: the “Shutdown” (selection bar) and “Stop” buttons showed text in the same colour as the background.
+
+## 2.9.1 · 2026-11-10
+- PDF report: smaller font in the list (more columns per page) and abbreviated headers (Device, OS, OS ver., Disk, Lat., CPU…). Abbreviated values: “Win 11 Pro”, “Dell” without “Inc.”, CPU without “(R)/(TM)”, “ARP”.
+
 ## 2.9.0 · 2026-11-05
 - New: **★ important devices** (star in the detail panel and context menu, summary filter and built-in view).
 - New: **❓ unknown devices**: alert for a never-seen MAC (after the first scan), “Mark as known” and an alert on auto-scan.

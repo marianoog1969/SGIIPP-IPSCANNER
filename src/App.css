@@ -317,11 +317,9 @@ kbd { font-family: Consolas, monospace; font-size: 12.5px; background: var(--pan
 .c-chk input { width: auto; margin: 0; cursor: pointer; }
 tbody tr.picked { background: rgba(37, 99, 235, .10); }
 .selbar { display: flex; align-items: center; gap: 8px; padding: 8px 14px; border-bottom: 1px solid var(--line); background: rgba(37, 99, 235, .08); }
-.btn.danger { color: #b91c1c; border-color: #fca5a5; }
-.btn.danger:hover:not(:disabled) { background: #fee2e2; }
 .selbar { flex: none; }
-.btn.danger, .btn.danger:hover, .btn.danger:focus, .btn.danger:active { color: #b91c1c; }
-.btn.danger:hover:not(:disabled), .btn.danger:focus:not(:disabled) { background: #fee2e2; }
+.selbar .btn.danger { background: var(--panel); color: #b91c1c; border-color: #fca5a5; }
+.selbar .btn.danger:hover:not(:disabled), .selbar .btn.danger:focus:not(:disabled) { background: #fee2e2; color: #b91c1c; }
 
 /* La barra de filtros pasa a otra línea en vez de cortarse */
 .subbar { flex-wrap: wrap; row-gap: 6px; }
@@ -378,3 +376,9 @@ ul.cmp li { margin: 2px 0; font-family: Consolas, monospace; }
 .chip.star { color: #9a6b00; border-color: #e6c46a; background: #fff8e1; }
 .chip.star.on { background: #d99a00; color: #fff; border-color: #d99a00; }
 .d-sec.conflict .btn { margin-top: 6px; }
+
+.swlist { max-height: 52vh; overflow-y: auto; border: 1px solid var(--line); border-radius: 6px; }
+.swrow { display: flex; justify-content: space-between; gap: 12px; padding: 5px 10px; font-size: 13px; border-bottom: 1px solid var(--line); }
+.swrow:nth-child(even) { background: rgba(127, 127, 127, 0.07); }
+.swname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.swver { color: var(--muted, #667); white-space: nowrap; font-variant-numeric: tabular-nums; }

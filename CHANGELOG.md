@@ -14,6 +14,16 @@ npm run version:minor    # novedades
 npm run version:major    # cambio mayor
 ```
 
+## 3.0.0 · 2026-11-19
+- Novedad: **ficha ampliada** con antivirus, estado de BitLocker por unidad, último parche instalado y botón **Software instalado** (lista filtrable y copiable).
+- Novedad: **puertos abiertos** (13 puertos habituales): botón en la ficha y en la barra de selección, columna opcional, y datos en el informe PDF y el Excel.
+- Novedad: **Exportar Excel** (.xlsx) con todos los equipos y columnas, y una hoja de discos con semáforo.
+- Nuevas columnas opcionales en el informe: Antivirus, BitLocker, Último parche y Puertos abiertos.
+- Corrección: los botones «Apagar» (barra de selección) y «Detener» se veían con el texto del mismo color que el fondo.
+
+## 2.9.1 · 2026-11-10
+- Informe PDF: letra más pequeña en el listado (más columnas por página) y cabeceras abreviadas (Equipo, SO, Ver. SO, Disco, Lat., CPU…). Valores abreviados: «Win 11 Pro», «Dell» sin «Inc.», CPU sin «(R)/(TM)», «ARP».
+
 ## 2.9.0 · 2026-11-05
 - Novedad: **★ equipos importantes** (estrella en la ficha y en el menú contextual, filtro en el resumen y vista predefinida).
 - Novedad: **❓ equipos desconocidos**: aviso de MAC nunca vista (tras el primer escaneo), «Marcar como conocido» y aviso en el escaneo automático.

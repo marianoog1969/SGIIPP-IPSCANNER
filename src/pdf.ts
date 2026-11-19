@@ -1,6 +1,6 @@
 import { jsPDF } from "jspdf";
 import { __createTable, __drawTable, type UserOptions } from "jspdf-autotable";
-import { Col, Row, colLabel } from "./columns";
+import { Col, Row, colShort } from "./columns";
 import { t, tn, locale } from "./i18n";
 import { ALERT_PCT, WARN_PCT, diskAlerts, diskPct, fmtBytes, lightClass, worstDisk } from "./lib";
 
@@ -145,20 +145,39 @@ export function generateReport(o: ReportOptions): Uint8Array {
     return yy + 70;
   };
 
+  /** Abrevia valores largos para ganar espacio en el listado. */
+  const abbr = (key: string, v: string) => {
+    switch (key) {
+      case "os":
+        return v.replace(/^Windows Server/i, "Win Server").replace(/^Windows/i, "Win");
+      case "modelo":
+        return v
+          .replace(/Hewlett[- ]Packard/i, "HP")
+          .replace(/\s+(Inc\.?|Corporation|Corp\.?|Co\.,? Ltd\.?)(?=\s|$)/gi, "")
+          .trim();
+      case "cpu":
+        return v.replace(/\((R|TM)\)/g, "").replace(/\s+(CPU|Processor)\b/gi, "").replace(/\s{2,}/g, " ").trim();
+      case "estado":
+        return v === t("Solo ARP") ? "ARP" : v;
+      default:
+        return v;
+    }
+  };
+
   const baseTable = (extra: UserOptions): UserOptions => ({
     margin: { top: MT, left: ML, right: MR, bottom: MB },
     theme: "grid",
     rowPageBreak: "avoid",
     styles: {
       font: "helvetica",
-      fontSize: 8,
-      cellPadding: { top: 4, bottom: 4, left: 5, right: 5 },
+      fontSize: 7,
+      cellPadding: { top: 3, bottom: 3, left: 4, right: 4 },
       textColor: GRIS_TEXTO,
       lineColor: BORDE,
       lineWidth: 0.4,
       overflow: "linebreak",
     },
-    headStyles: { fillColor: AZUL_FONDO, textColor: BLANCO, fontStyle: "bold", fontSize: 7 },
+    headStyles: { fillColor: AZUL_FONDO, textColor: BLANCO, fontStyle: "bold", fontSize: 6 },
     alternateRowStyles: { fillColor: GRIS_FONDO },
     ...extra,
   });
@@ -178,8 +197,8 @@ export function generateReport(o: ReportOptions): Uint8Array {
     const rowData = o.rows;
     const opts = baseTable({
       startY,
-      head: [o.cols.map((c) => colLabel(c).toUpperCase())],
-      body: rowData.map((r) => o.cols.map((c) => c.get(r))),
+      head: [o.cols.map((c) => colShort(c).toUpperCase())],
+      body: rowData.map((r) => o.cols.map((c) => abbr(c.key, c.get(r)))),
       columnStyles: Object.fromEntries(
         o.cols.map((c, i) => [i, c.align === "right" ? { halign: "right" as const } : {}])
       ),

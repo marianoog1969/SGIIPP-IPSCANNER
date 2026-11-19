@@ -674,6 +674,13 @@ pub struct Info {
     pub threads: Option<f64>,
     pub cpu_load: Option<f64>,
     pub disks: Vec<Disk>,
+    /// Antivirus registrados en el Centro de seguridad (separados por coma).
+    pub av: Option<String>,
+    /// Estado de BitLocker por unidad: «C:1;D:0» (1 = protegida, 0 = no, 2 = desconocido).
+    pub bitlocker: Option<String>,
+    /// Número de parches (hotfix) instalados y fecha del último (AAAA-MM-DD).
+    pub patches: Option<f64>,
+    pub last_patch: Option<String>,
 }
 
 #[derive(serde::Deserialize)]
@@ -710,6 +717,14 @@ struct RawInfo {
     cpu_load: Option<f64>,
     #[serde(default)]
     disks: Vec<RawDisk>,
+    #[serde(default)]
+    av: Option<String>,
+    #[serde(default)]
+    bitlocker: Option<String>,
+    #[serde(default)]
+    patches: Option<f64>,
+    #[serde(default)]
+    last_patch: Option<String>,
 }
 
 fn clean(s: Option<String>) -> Option<String> {
@@ -748,7 +763,83 @@ pub fn parse_info_json(json: &str) -> Result<Info, String> {
                 free: d.free_space.unwrap_or(0),
             })
             .collect(),
+        av: clean(r.av),
+        bitlocker: clean(r.bitlocker),
+        patches: r.patches,
+        last_patch: clean(r.last_patch),
     })
+}
+
+// ───────────────────────── Software instalado ─────────────────────────
+
+#[derive(Serialize, Clone, Debug, PartialEq)]
+pub struct Software {
+    pub name: String,
+    pub version: String,
+    pub publisher: String,
+}
+
+#[derive(serde::Deserialize)]
+struct RawSw {
+    name: Option<String>,
+    version: Option<String>,
+    publisher: Option<String>,
+}
+
+/// Lee la lista de programas (acepta un array o un único objeto), sin duplicados y ordenada.
+pub fn parse_software_json(json: &str) -> Result<Vec<Software>, String> {
+    let json = json.trim().trim_start_matches('\u{feff}');
+    let v: serde_json::Value =
+        serde_json::from_str(json).map_err(|e| format!("Respuesta no válida: {e}"))?;
+    let items: Vec<RawSw> = match v {
+        serde_json::Value::Array(a) => a
+            .into_iter()
+            .filter_map(|x| serde_json::from_value(x).ok())
+            .collect(),
+        serde_json::Value::Object(_) => serde_json::from_value(v).ok().into_iter().collect(),
+        _ => Vec::new(),
+    };
+    let mut out: Vec<Software> = items
+        .into_iter()
+        .filter_map(|r| {
+            let name = clean(r.name)?;
+            Some(Software {
+                name,
+                version: clean(r.version).unwrap_or_default(),
+                publisher: clean(r.publisher).unwrap_or_default(),
+            })
+        })
+        .collect();
+    out.sort_by(|a, b| {
+        a.name
+            .to_lowercase()
+            .cmp(&b.name.to_lowercase())
+            .then_with(|| a.version.cmp(&b.version))
+    });
+    out.dedup_by(|a, b| a.name == b.name && a.version == b.version);
+    Ok(out)
+}
+
+// ───────────────────────── Puertos abiertos ─────────────────────────
+
+/// Puertos habituales que se comprueban (FTP, SSH, Telnet, HTTP, RPC, NetBIOS, HTTPS, SMB,
+/// IPP, RDP, VNC, HTTP alterno, impresión JetDirect).
+pub const PORTS: [u16; 13] = [21, 22, 23, 80, 135, 139, 443, 445, 631, 3389, 5900, 8080, 9100];
+
+/// Devuelve los puertos de la lista que aceptan conexión TCP, ordenados.
+pub async fn scan_ports(ip: Ipv4Addr) -> Vec<u16> {
+    let mut set = JoinSet::new();
+    for p in PORTS {
+        set.spawn(async move { (p, port_open(ip, p).await) });
+    }
+    let mut open = Vec::new();
+    while let Some(r) = set.join_next().await {
+        if let Ok((p, true)) = r {
+            open.push(p);
+        }
+    }
+    open.sort_unstable();
+    open
 }
 
 #[cfg(windows)]
@@ -776,6 +867,19 @@ try {
     $cpu  = @(Q 'Win32_Processor' $null $false)
     $bios = Q 'Win32_BIOS' $null $false
     $dk   = @(Q 'Win32_LogicalDisk' 'DriveType=3' $false)
+    $hf   = @(Q 'Win32_QuickFixEngineering' $null $false)
+    $av = $null
+    try {
+      $a = @{ Namespace='root/SecurityCenter2'; ClassName='AntiVirusProduct'; ErrorAction='Stop' }
+      if ($s) { $a.CimSession = $s }
+      $av = (@(Get-CimInstance @a | ForEach-Object { $_.displayName } | Where-Object { $_ } | Select-Object -Unique)) -join ', '
+    } catch { }
+    $bl = $null
+    try {
+      $a = @{ Namespace='root/CIMV2/Security/MicrosoftVolumeEncryption'; ClassName='Win32_EncryptableVolume'; ErrorAction='Stop' }
+      if ($s) { $a.CimSession = $s }
+      $bl = (@(Get-CimInstance @a | ForEach-Object { '' + $_.DriveLetter + '' + [int]$_.ProtectionStatus }) -join ';')
+    } catch { }
     $lu = $null
     try {
       $ra = @{ Namespace='root/default'; ClassName='StdRegProv'; MethodName='GetStringValue'; ErrorAction='Stop'
@@ -787,6 +891,11 @@ try {
   $up = $null
   if ($os.LastBootUpTime -and $os.LocalDateTime) { $up = [math]::Round(($os.LocalDateTime - $os.LastBootUpTime).TotalSeconds) }
   $load = ($cpu | Measure-Object LoadPercentage -Average).Average
+  $lp = $null
+  try {
+    $d = @($hf | ForEach-Object { try { [datetime]$_.InstalledOn } catch { } } | Where-Object { $_ } | Sort-Object -Descending | Select-Object -First 1)
+    if ($d.Count -gt 0) { $lp = $d[0].ToString('yyyy-MM-dd') }
+  } catch { }
   $o = [ordered]@{
     os = $os.Caption; version = $os.Version; build = $os.BuildNumber; arch = $os.OSArchitecture
     uptime_s = $up
@@ -799,10 +908,61 @@ try {
     threads = ($cpu | Measure-Object NumberOfLogicalProcessors -Sum).Sum
     cpu_load = $load
     disks = @($dk | Select-Object DeviceID,VolumeName,Size,FreeSpace)
+    av = $av; bitlocker = $bl; patches = $hf.Count; last_patch = $lp
   }
   ConvertTo-Json -InputObject $o -Compress -Depth 4
 } catch { [Console]::Error.WriteLine($_.Exception.Message); exit 1 }
 "#;
+
+/// Ejecuta un script de PowerShell contra un equipo (o contra este, si es local) y devuelve su salida.
+#[cfg(windows)]
+async fn run_ps(
+    script: &'static str,
+    ip: Ipv4Addr,
+    name: &str,
+    cred: Option<(String, String)>,
+    secs: u64,
+) -> Result<String, String> {
+    let is_local = local_hosts().contains_key(&ip);
+    let host = if name.trim().is_empty() {
+        ip.to_string()
+    } else {
+        name.trim().to_string()
+    };
+    let mut cmd = Command::new("powershell.exe");
+    cmd.args([
+        "-NoProfile",
+        "-NonInteractive",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-Command",
+        script,
+    ])
+    .env("SCAN_HOST", host)
+    .env("SCAN_LOCAL", if is_local { "1" } else { "0" })
+    .stdin(Stdio::null())
+    .stdout(Stdio::piped())
+    .stderr(Stdio::piped())
+    .kill_on_drop(true);
+    if let (Some((u, p)), false) = (cred, is_local) {
+        cmd.env("SCAN_USER", u).env("SCAN_PASS", p);
+    }
+    cmd.creation_flags(CREATE_NO_WINDOW);
+
+    let out = tokio::time::timeout(Duration::from_secs(secs), cmd.output())
+        .await
+        .map_err(|_| "Tiempo de espera agotado consultando el equipo".to_string())?
+        .map_err(|e| format!("No se pudo ejecutar PowerShell: {e}"))?;
+    if !out.status.success() {
+        let err = String::from_utf8_lossy(&out.stderr);
+        let msg = err
+            .lines()
+            .find(|l| !l.trim().is_empty())
+            .unwrap_or("Error desconocido");
+        return Err(msg.trim().to_string());
+    }
+    Ok(String::from_utf8_lossy(&out.stdout).to_string())
+}
 
 /// Ficha del equipo (SO, RAM, CPU, modelo, serie, discos...) por WMI/DCOM. Solo Windows.
 pub async fn get_info(
@@ -817,45 +977,70 @@ pub async fn get_info(
     }
     #[cfg(windows)]
     {
-        let is_local = local_hosts().contains_key(&ip);
-        let host = if name.trim().is_empty() {
-            ip.to_string()
-        } else {
-            name.trim().to_string()
-        };
-        let mut cmd = Command::new("powershell.exe");
-        cmd.args([
-            "-NoProfile",
-            "-NonInteractive",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-Command",
-            INFO_PS,
-        ])
-        .env("SCAN_HOST", host)
-        .env("SCAN_LOCAL", if is_local { "1" } else { "0" })
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .kill_on_drop(true);
-        if let (Some((u, p)), false) = (cred, is_local) {
-            cmd.env("SCAN_USER", u).env("SCAN_PASS", p);
-        }
-        cmd.creation_flags(CREATE_NO_WINDOW);
+        let out = run_ps(INFO_PS, ip, name, cred, 60).await?;
+        parse_info_json(&out)
+    }
+}
 
-        let out = tokio::time::timeout(Duration::from_secs(40), cmd.output())
-            .await
-            .map_err(|_| "Tiempo de espera agotado consultando el equipo".to_string())?
-            .map_err(|e| format!("No se pudo ejecutar PowerShell: {e}"))?;
-        if !out.status.success() {
-            let err = String::from_utf8_lossy(&out.stderr);
-            let msg = err
-                .lines()
-                .find(|l| !l.trim().is_empty())
-                .unwrap_or("Error desconocido");
-            return Err(msg.trim().to_string());
+#[cfg(windows)]
+const SOFTWARE_PS: &str = r#"
+$ErrorActionPreference='Stop'
+[Console]::OutputEncoding=[Text.Encoding]::UTF8
+try {
+  $s = $null
+  if ($env:SCAN_LOCAL -ne '1') {
+    $p = @{ ComputerName=$env:SCAN_HOST; SessionOption=(New-CimSessionOption -Protocol Dcom); OperationTimeoutSec=20 }
+    if ($env:SCAN_USER) {
+      $p.Credential = New-Object System.Management.Automation.PSCredential($env:SCAN_USER,(ConvertTo-SecureString $env:SCAN_PASS -AsPlainText -Force))
+    }
+    $s = New-CimSession @p
+  }
+  function RE($path) {
+    $a = @{ Namespace='root/default'; ClassName='StdRegProv'; MethodName='EnumKey'; Arguments=@{ hDefKey=[uint32]2147483650; sSubKeyName=$path } }
+    if ($s) { $a.CimSession = $s }
+    (Invoke-CimMethod @a).sNames
+  }
+  function RS($path, $name) {
+    $a = @{ Namespace='root/default'; ClassName='StdRegProv'; MethodName='GetStringValue'; Arguments=@{ hDefKey=[uint32]2147483650; sSubKeyName=$path; sValueName=$name } }
+    if ($s) { $a.CimSession = $s }
+    (Invoke-CimMethod @a).sValue
+  }
+  $list = @()
+  try {
+    try {
+      $a = @{ ClassName='Win32_InstalledWin32Program'; ErrorAction='Stop' }
+      if ($s) { $a.CimSession = $s }
+      $list = @(Get-CimInstance @a | ForEach-Object { [pscustomobject]@{ name=$_.Name; version=$_.Version; publisher=$_.Vendor } })
+    } catch { $list = @() }
+    if ($list.Count -eq 0) {
+      foreach ($base in 'SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall','SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall') {
+        foreach ($k in @(RE $base)) {
+          if (-not $k) { continue }
+          $n = RS ($base + '\' + $k) 'DisplayName'
+          if ($n) { $list += [pscustomobject]@{ name=$n; version=(RS ($base + '\' + $k) 'DisplayVersion'); publisher=$null } }
         }
-        parse_info_json(&String::from_utf8_lossy(&out.stdout))
+      }
+    }
+  } finally { if ($s) { Remove-CimSession $s } }
+  ConvertTo-Json -InputObject @($list) -Compress -Depth 3
+} catch { [Console]::Error.WriteLine($_.Exception.Message); exit 1 }
+"#;
+
+/// Programas instalados en el equipo (WMI/DCOM). Solo Windows.
+pub async fn get_software(
+    ip: Ipv4Addr,
+    name: &str,
+    cred: Option<(String, String)>,
+) -> Result<Vec<Software>, String> {
+    #[cfg(not(windows))]
+    {
+        let _ = (ip, name, cred);
+        Err("La consulta de equipos solo está disponible en Windows".into())
+    }
+    #[cfg(windows)]
+    {
+        let out = run_ps(SOFTWARE_PS, ip, name, cred, 240).await?;
+        parse_software_json(&out)
     }
 }
 
@@ -912,5 +1097,38 @@ mod tests {
         assert_eq!(m[&"192.168.1.1".parse().unwrap()], "00:11:22:33:44:55");
         let lin = "? (192.168.1.7) at aa:bb:cc:dd:ee:ff [ether] on eth0";
         assert_eq!(parse_arp_text(lin).len(), 1);
+    }
+
+    #[test]
+    fn software_json() {
+        let j = r#"[{"name":"7-Zip","version":"23.01","publisher":"Igor Pavlov"},{"name":"7-Zip","version":"23.01","publisher":null},{"name":"Adobe Reader","version":null,"publisher":null},{"name":null,"version":"1"}]"#;
+        let v = parse_software_json(j).unwrap();
+        assert_eq!(v.len(), 2);
+        assert_eq!(v[0].name, "7-Zip");
+        assert_eq!(v[1].version, "");
+        // un único objeto (PowerShell sin array) también vale
+        assert_eq!(parse_software_json(r#"{"name":"X","version":"1"}"#).unwrap().len(), 1);
+        assert!(parse_software_json("[]").unwrap().is_empty());
+    }
+
+    #[test]
+    fn info_extra() {
+        let j = r#"{"os":"Windows 11","disks":[],"av":"Windows Defender","bitlocker":"C:1;D:0","patches":42,"last_patch":"2026-10-14"}"#;
+        let i = parse_info_json(j).unwrap();
+        assert_eq!(i.av.as_deref(), Some("Windows Defender"));
+        assert_eq!(i.bitlocker.as_deref(), Some("C:1;D:0"));
+        assert_eq!(i.patches, Some(42.0));
+        assert_eq!(i.last_patch.as_deref(), Some("2026-10-14"));
+        // sin los campos nuevos sigue funcionando
+        assert!(parse_info_json(r#"{"os":null,"disks":[]}"#).unwrap().av.is_none());
+    }
+
+    #[tokio::test]
+    async fn puertos() {
+        let l = tokio::net::TcpListener::bind("127.0.0.1:8080").await;
+        if let Ok(_l) = l {
+            let open = scan_ports(Ipv4Addr::LOCALHOST).await;
+            assert!(open.contains(&8080));
+        }
     }
 }

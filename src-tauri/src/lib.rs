@@ -79,6 +79,33 @@ async fn get_info(
 }
 
 #[tauri::command]
+async fn get_software(
+    ip: String,
+    name: String,
+    user: Option<String>,
+    password: Option<String>,
+) -> Result<Vec<scanner::Software>, String> {
+    let ip: std::net::Ipv4Addr = ip.parse().map_err(|_| "IP no válida".to_string())?;
+    let cred = match (user, password) {
+        (Some(u), Some(p)) if !u.trim().is_empty() => Some((u, p)),
+        _ => None,
+    };
+    logger::log("INFO", &format!("software de {ip} ({name}) …"));
+    let r = scanner::get_software(ip, &name, cred).await;
+    match &r {
+        Ok(v) => logger::log("INFO", &format!("software de {ip}: {} programas", v.len())),
+        Err(e) => logger::log("WARN", &format!("software de {ip} fallido: {e}")),
+    }
+    r
+}
+
+#[tauri::command]
+async fn scan_ports(ip: String) -> Result<Vec<u16>, String> {
+    let ip: std::net::Ipv4Addr = ip.parse().map_err(|_| "IP no válida".to_string())?;
+    Ok(scanner::scan_ports(ip).await)
+}
+
+#[tauri::command]
 fn save_file(path: String, data_base64: String) -> Result<(), String> {
     use base64::{engine::general_purpose::STANDARD, Engine};
     let bytes = STANDARD
@@ -465,6 +492,8 @@ pub fn run() {
             start_scan,
             stop_scan,
             get_info,
+            get_software,
+            scan_ports,
             save_file,
             remote_tools,
             open_remote,

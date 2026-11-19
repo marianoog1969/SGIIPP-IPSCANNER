@@ -38,7 +38,48 @@ export interface Info {
   threads: number | null;
   cpu_load: number | null;
   disks: Disk[];
+  av?: string | null;
+  bitlocker?: string | null;
+  patches?: number | null;
+  last_patch?: string | null;
 }
+export interface Software {
+  name: string;
+  version: string;
+  publisher: string;
+}
+
+/** «C:1;D:0» → «C: sí · D: no» (2 = desconocido). */
+export const bitlockerText = (s: string | null | undefined) =>
+  s
+    ? s
+        .split(";")
+        .filter(Boolean)
+        .map((x) => {
+          const st = x.slice(-1);
+          return `${x.slice(0, -1)} ${st === "1" ? t("sí") : st === "0" ? t("no") : "?"}`;
+        })
+        .join(" · ")
+    : "";
+
+/** Puertos que se comprueban y su servicio. */
+export const PORT_NAMES: Record<number, string> = {
+  21: "FTP",
+  22: "SSH",
+  23: "Telnet",
+  80: "HTTP",
+  135: "RPC",
+  139: "NetBIOS",
+  443: "HTTPS",
+  445: "SMB",
+  631: "IPP",
+  3389: "RDP",
+  5900: "VNC",
+  8080: "HTTP-alt",
+  9100: "JetDirect",
+};
+export const portsText = (p: number[] | undefined) =>
+  p ? (p.length ? p.map((n) => PORT_NAMES[n] ?? String(n)).join(", ") : "—") : "";
 export interface InfoState {
   loading: boolean;
   info?: Info;

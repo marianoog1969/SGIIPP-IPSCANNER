@@ -23,6 +23,9 @@ import {
   ipNum,
   deviceKind,
   osVersion,
+  bitlockerText,
+  portsText,
+  PORT_NAMES,
 } from "./lib";
 import { COLS, colLabel, DEFAULT_COLS, Row } from "./columns";
 import { saveBytes } from "./files";
@@ -42,6 +45,8 @@ import CompareDialog from "./CompareDialog";
 import { recordScan, getHist, histKeys } from "./history";
 import { loadStars, saveStars, starKey, loadKnown, saveKnown, hasMac } from "./marks";
 import { vendorOf, isRandomMac } from "./oui";
+import SoftwareDialog from "./SoftwareDialog";
+import { buildXlsx } from "./excel";
 import SettingsDialog, { DEFAULT_SETTINGS, Settings } from "./SettingsDialog";
 
 function AlertIcon({ info }: { info?: Info }) {
@@ -103,7 +108,7 @@ const loadLast = (): LastScan | null => {
   }
 };
 
-const TCOL_KEYS = ["name", "ip", "mac", "vendor", "user", "os", "osver", "ram", "disk", "ms", "note"];
+const TCOL_KEYS = ["name", "ip", "mac", "vendor", "user", "os", "osver", "ram", "disk", "ms", "av", "bl", "patch", "ports", "note"];
 const DEFAULT_TCOLS = ["name", "ip", "mac", "user", "os", "osver", "ram", "disk", "ms"];
 
 export default function App() {
@@ -126,6 +131,9 @@ export default function App() {
   const [selected, setSelected] = useState<string | null>(null);
   const [infos, setInfos] = useState<Map<string, InfoState>>(new Map());
   const [cred, setCred] = useState({ user: "", pass: "" });
+  const [ports, setPorts] = useState<Map<string, number[]>>(new Map());
+  const [portsBusy, setPortsBusy] = useState<Set<string>>(new Set());
+  const [swHost, setSwHost] = useState<Host | null>(null);
   const [autoCheck, setAutoCheck] = useState(prefs.autoCheck ?? true);
   const [onlyAlerts, setOnlyAlerts] = useState(prefs.onlyAlerts ?? false);
   const [kindFilter, setKindFilter] = useState<string>(prefs.kindFilter || "all");
@@ -831,6 +839,46 @@ export default function App() {
       .catch((e) => setError(String(e)));
   };
 
+  const checkPorts = async (list: Host[]) => {
+    const todo = list.filter((h) => !portsBusy.has(h.ip));
+    if (!todo.length) return;
+    setPortsBusy((c) => new Set([...c, ...todo.map((h) => h.ip)]));
+    let i = 0;
+    const worker = async () => {
+      while (i < todo.length) {
+        const h = todo[i++];
+        try {
+          const open = await invoke<number[]>("scan_ports", { ip: h.ip });
+          setPorts((c) => new Map(c).set(h.ip, open));
+        } catch (e) {
+          setError(String(e));
+        }
+        setPortsBusy((c) => {
+          const n = new Set(c);
+          n.delete(h.ip);
+          return n;
+        });
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(8, todo.length) }, worker));
+    if (todo.length > 1) notify(t("Puertos comprobados en {n} equipos", { n: todo.length }));
+  };
+
+  const exportXlsx = async () => {
+    try {
+      const bytes = await buildXlsx(allRows, COLS, { sheet: t("Equipos"), disks: t("Discos") });
+      const path = await saveBytes(
+        `${t("inventario_red")}_${new Date().toISOString().slice(0, 10)}.xlsx`,
+        t("Libro de Excel"),
+        "xlsx",
+        bytes
+      );
+      if (path) notify(t("Excel guardado"));
+    } catch (e) {
+      setError(String(e));
+    }
+  };
+
   const sel = selected ? hosts.get(selected) : undefined;
   const ds = sel ? infos.get(sel.ip) : undefined;
   const info = ds?.info;
@@ -900,6 +948,24 @@ export default function App() {
     { key: "ram", label: "RAM", sort: "ram", num: true, td: (h) => <td key="ram" className="num">{infoCell(h, ramOf(h) ? fmtRam(ramOf(h)) : null)}</td> },
     { key: "disk", label: t("Almacenamiento"), sort: "disk", td: (h) => <td key="disk">{diskCell(h)}</td> },
     { key: "ms", label: t("Latencia"), sort: "ms", num: true, td: (h) => <td key="ms" className="num">{h.ms != null ? `${h.ms} ms` : <span className="muted">—</span>}</td> },
+    { key: "av", label: "Antivirus", td: (h) => { const v = infos.get(h.ip)?.info?.av; return <td key="av" title={v ?? ""}>{infoCell(h, v || null)}</td>; } },
+    { key: "bl", label: "BitLocker", td: (h) => { const v = bitlockerText(infos.get(h.ip)?.info?.bitlocker); return <td key="bl" title={v}>{infoCell(h, v || null)}</td>; } },
+    {
+      key: "patch",
+      label: t("Último parche"),
+      td: (h) => {
+        const i = infos.get(h.ip)?.info;
+        return <td key="patch" title={i?.patches ? t("{n} parches instalados", { n: i.patches }) : ""}>{infoCell(h, i?.last_patch || null)}</td>;
+      },
+    },
+    {
+      key: "ports",
+      label: t("Puertos abiertos"),
+      td: (h) => {
+        const p = ports.get(h.ip);
+        return <td key="ports" title={portsText(p)}>{portsBusy.has(h.ip) ? <span className="muted">…</span> : p ? portsText(p) : <span className="muted">—</span>}</td>;
+      },
+    },
     {
       key: "note",
       label: t("Ubicación y nota"),
@@ -947,7 +1013,7 @@ export default function App() {
     return i && diskAlerts(i).length > 0;
   }).length;
 
-  const toRow = (h: Host): Row => ({ h, info: infos.get(h.ip)?.info });
+  const toRow = (h: Host): Row => ({ h, info: infos.get(h.ip)?.info, ports: ports.get(h.ip) });
   const visibleRows: Row[] = rows.map(toRow);
   const allRows: Row[] = [...hosts.values()].sort((a, b) => ipNum(a.ip) - ipNum(b.ip)).map(toRow);
 
@@ -1080,6 +1146,9 @@ export default function App() {
         </button>
         <button className="btn" disabled={!rows.length} onClick={exportCsv}>
           {t("Exportar CSV")}
+        </button>
+        <button className="btn" disabled={!hosts.size} onClick={exportXlsx} title={t("Inventario completo en Excel (todos los equipos y columnas, más una hoja de discos)")}>
+          {t("Exportar Excel")}
         </button>
         <button className="btn primary" disabled={!hosts.size} onClick={() => setDialog("report")}>
           {t("Informe PDF")}
@@ -1259,6 +1328,9 @@ export default function App() {
             }
           >
             {t("Copiar IPs")}
+          </button>
+          <button className="btn" onClick={() => checkPorts([...marked].map((ip) => hosts.get(ip)).filter((h): h is Host => !!h))} title={t("Comprobar los puertos habituales de los equipos seleccionados")}>
+            {t("Puertos")}
           </button>
           <span className="sep-v" />
           <button className="btn" onClick={markVisible} title={t("Marcar todos los equipos visibles (Ctrl+A)")}>{t("Marcar visibles")}</button>
@@ -1484,6 +1556,12 @@ export default function App() {
                 {row(t("Último usuario"), userOf(info))}
                 {row(t("Dominio"), info.domain)}
                 {row(t("Encendido"), info.uptime_s != null ? t("hace {t}", { t: fmtUptime(info.uptime_s) }) : null)}
+                {row("Antivirus", info.av)}
+                {row("BitLocker", bitlockerText(info.bitlocker))}
+                {row(
+                  t("Último parche"),
+                  info.last_patch && `${info.last_patch}${info.patches ? ` · ${t("{n} parches instalados", { n: info.patches })}` : ""}`
+                )}
               </dl>
 
               {info.ram_total
@@ -1509,6 +1587,25 @@ export default function App() {
               })}
             </>
           )}
+
+          <div className="d-sec">
+            <h3>{t("Puertos abiertos")}</h3>
+            {ports.has(sel.ip) && (
+              <p className="small">
+                {ports.get(sel.ip)!.length
+                  ? ports.get(sel.ip)!.map((n) => `${PORT_NAMES[n] ?? n} (${n})`).join(" · ")
+                  : t("Ninguno de los puertos habituales responde.")}
+              </p>
+            )}
+            <div className="d-actions">
+              <button className="btn" disabled={portsBusy.has(sel.ip)} onClick={() => checkPorts([sel])}>
+                {portsBusy.has(sel.ip) ? t("Comprobando…") : ports.has(sel.ip) ? t("Volver a comprobar") : t("Comprobar puertos")}
+              </button>
+              <button className="btn" disabled={!!ds?.loading} onClick={() => setSwHost(sel)} title={t("Lista de programas instalados (puede tardar)")}>
+                {t("Software instalado")}
+              </button>
+            </div>
+          </div>
 
           <details className="cred">
             <summary>{t("Usar otras credenciales")}</summary>
@@ -1722,6 +1819,14 @@ export default function App() {
         </div>
       )}
       {dialog === "compare" && <CompareDialog onClose={() => setDialog(null)} notify={notify} onWake={(l) => wake(l)} />}
+      {swHost && (
+        <SoftwareDialog
+          host={swHost}
+          cred={cred.user.trim() ? cred : null}
+          onClose={() => setSwHost(null)}
+          notify={notify}
+        />
+      )}
       {dialog === "log" && <LogDialog onClose={() => setDialog(null)} notify={notify} />}
       {dialog === "manual" && <Manual onClose={() => setDialog(null)} />}
       {showSettings && (
