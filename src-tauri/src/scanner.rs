@@ -25,6 +25,9 @@ pub struct Host {
     pub alive: bool,
     /// Pista de tipo según puertos abiertos: "printer", "pc" o "" (desconocido)
     pub kind: String,
+    /// Nombre que daba el DNS cuando no coincide con el que dice el propio equipo (registro antiguo).
+    #[serde(rename = "oldName", skip_serializing_if = "Option::is_none")]
+    pub old_name: Option<String>,
 }
 
 #[derive(Serialize, Clone, Debug)]
@@ -347,7 +350,103 @@ async fn netbios_name(_ip: Ipv4Addr) -> Option<String> {
     None
 }
 
-async fn resolve_name(ip: Ipv4Addr) -> String {
+/// Un nombre de DNS inverso solo es de fiar si el DNS directo lo devuelve a la misma IP
+/// (los registros PTR antiguos de equipos que ya no existen devuelven nombres falsos).
+fn name_matches(ip: Ipv4Addr, forward: &[IpAddr]) -> bool {
+    forward.contains(&IpAddr::V4(ip))
+}
+
+/// Consulta de estado de NetBIOS (UDP 137): devuelve el nombre que el propio equipo dice tener.
+/// Más rápido y fiable que `nbtstat` (no lanza procesos ni depende del adaptador).
+fn netbios_udp(ip: Ipv4Addr) -> Option<String> {
+    use std::net::UdpSocket;
+    let mut q: Vec<u8> = vec![0x4e, 0x42, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0x20];
+    q.extend_from_slice(b"CKAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA");
+    q.extend_from_slice(&[0, 0, 0x21, 0, 1]);
+    let sock = UdpSocket::bind("0.0.0.0:0").ok()?;
+    sock.set_read_timeout(Some(Duration::from_millis(1200))).ok()?;
+    sock.send_to(&q, (ip, 137)).ok()?;
+    let mut buf = [0u8; 1024];
+    let (n, _) = sock.recv_from(&mut buf).ok()?;
+    parse_nbstat(&buf[..n])
+}
+
+/// Extrae el nombre del equipo (sufijo 0x00, no de grupo) de una respuesta NBSTAT.
+fn parse_nbstat(b: &[u8]) -> Option<String> {
+    if b.len() < 12 {
+        return None;
+    }
+    let qd = u16::from_be_bytes([b[4], b[5]]) as usize;
+    let an = u16::from_be_bytes([b[6], b[7]]) as usize;
+    if an == 0 {
+        return None;
+    }
+    let mut p = 12;
+    // salta nombres (etiquetas o puntero comprimido)
+    let skip_name = |p: &mut usize| -> Option<()> {
+        loop {
+            let l = *b.get(*p)? as usize;
+            if l & 0xC0 == 0xC0 {
+                *p += 2;
+                return Some(());
+            }
+            *p += 1;
+            if l == 0 {
+                return Some(());
+            }
+            *p += l;
+        }
+    };
+    for _ in 0..qd {
+        skip_name(&mut p)?;
+        p += 4;
+    }
+    skip_name(&mut p)?;
+    p += 8; // tipo, clase, TTL
+    let rdlen = u16::from_be_bytes([*b.get(p)?, *b.get(p + 1)?]) as usize;
+    p += 2;
+    let end = (p + rdlen).min(b.len());
+    let count = *b.get(p)? as usize;
+    p += 1;
+    for _ in 0..count {
+        if p + 18 > end {
+            break;
+        }
+        let name = &b[p..p + 15];
+        let suffix = b[p + 15];
+        let flags = u16::from_be_bytes([b[p + 16], b[p + 17]]);
+        p += 18;
+        if suffix == 0x00 && flags & 0x8000 == 0 {
+            let n = String::from_utf8_lossy(name).trim().to_string();
+            if !n.is_empty() {
+                return Some(n);
+            }
+        }
+    }
+    None
+}
+
+/// ¿Es el mismo equipo? Compara la primera etiqueta del nombre DNS con el NetBIOS (máx. 15 letras).
+fn same_host(dns: &str, nb: &str) -> bool {
+    let label = dns.split('.').next().unwrap_or("");
+    let cut = |s: &str| s.to_lowercase().chars().take(15).collect::<String>();
+    cut(label) == cut(nb)
+}
+
+/// Decide qué nombre mostrar y, si el DNS decía otro, cuál era (nombre antiguo).
+/// - Si el equipo dice su nombre (NetBIOS), manda él.
+/// - Si no, solo se acepta el DNS cuando el DNS directo lo confirma.
+fn choose_name(dns: Option<(String, bool)>, nb: Option<String>) -> (String, Option<String>) {
+    match (dns, nb) {
+        (Some((d, _)), Some(n)) if same_host(&d, &n) => (d, None),
+        (Some((d, _)), Some(n)) => (n, Some(d)),
+        (None, Some(n)) => (n, None),
+        (Some((d, true)), None) => (d, None),
+        _ => (String::new(), None),
+    }
+}
+
+async fn resolve_name(ip: Ipv4Addr) -> (String, Option<String>) {
     let dns = tokio::time::timeout(
         Duration::from_secs(3),
         tokio::task::spawn_blocking(move || lookup_addr(&IpAddr::V4(ip)).ok()),
@@ -355,12 +454,39 @@ async fn resolve_name(ip: Ipv4Addr) -> String {
     .await
     .ok()
     .and_then(|r| r.ok())
-    .flatten();
+    .flatten()
+    .filter(|n| *n != ip.to_string());
 
-    match dns {
-        Some(n) if n != ip.to_string() => n,
-        _ => netbios_name(ip).await.unwrap_or_default(),
+    let dns = match dns {
+        Some(n) => {
+            let host = n.trim_end_matches('.').to_string();
+            let forward = tokio::time::timeout(
+                Duration::from_secs(3),
+                tokio::task::spawn_blocking(move || dns_lookup::lookup_host(&host).ok()),
+            )
+            .await
+            .ok()
+            .and_then(|r| r.ok())
+            .flatten();
+            let ok = forward.is_some_and(|f| name_matches(ip, &f));
+            Some((n, ok))
+        }
+        None => None,
+    };
+
+    let mut nb = tokio::time::timeout(
+        Duration::from_secs(3),
+        tokio::task::spawn_blocking(move || netbios_udp(ip)),
+    )
+    .await
+    .ok()
+    .and_then(|r| r.ok())
+    .flatten();
+    // Sin respuesta UDP y sin un DNS fiable: último recurso, `nbtstat`
+    if nb.is_none() && !matches!(dns, Some((_, true))) {
+        nb = netbios_name(ip).await;
     }
+    choose_name(dns, nb)
 }
 
 /// Puertos habituales: si alguno responde, el equipo está vivo aunque bloquee el ping.
@@ -560,11 +686,12 @@ pub async fn run_scan(ips: Vec<Ipv4Addr>, threads: usize, cancel: Arc<AtomicBool
             let _permit = permit;
             if !cancel.load(Ordering::Relaxed) {
                 if let Some(ms) = probe_alive(ip, total <= 1024).await {
-                    let (name, mac) = match locals.get(&ip) {
-                        Some((n, m)) => (n.clone(), m.clone()),
+                    let (name, old_name, mac) = match locals.get(&ip) {
+                        Some((n, m)) => (n.clone(), None, m.clone()),
                         None => {
                             let mac = arp_table().await.get(&ip).cloned().unwrap_or_default();
-                            (resolve_name(ip).await, mac)
+                            let (n, old) = resolve_name(ip).await;
+                            (n, old, mac)
                         }
                     };
                     found.lock().unwrap().insert(ip);
@@ -576,11 +703,12 @@ pub async fn run_scan(ips: Vec<Ipv4Addr>, threads: usize, cancel: Arc<AtomicBool
                         ms: Some(ms),
                         alive: true,
                         kind,
+                        old_name,
                     }));
                 } else if total <= 1024 {
                     // Sin ping ni puertos: ARP activo (solo equipos de la misma subred)
                     if let Some(mac) = send_arp(ip).await {
-                        let name = resolve_name(ip).await;
+                        let (name, old_name) = resolve_name(ip).await;
                         found.lock().unwrap().insert(ip);
                         let kind = detect_kind(ip, &gw).await;
                         emit(ScanEvent::Host(Host {
@@ -590,6 +718,7 @@ pub async fn run_scan(ips: Vec<Ipv4Addr>, threads: usize, cancel: Arc<AtomicBool
                             ms: None,
                             alive: false,
                             kind,
+                            old_name,
                         }));
                     }
                 }
@@ -617,7 +746,7 @@ pub async fn run_scan(ips: Vec<Ipv4Addr>, threads: usize, cancel: Arc<AtomicBool
         for (ip, mac) in extra {
             let (emit, found, gw) = (emit.clone(), found.clone(), gw.clone());
             set.spawn(async move {
-                let name = resolve_name(ip).await;
+                let (name, old_name) = resolve_name(ip).await;
                 found.lock().unwrap().insert(ip);
                 let kind = detect_kind(ip, &gw).await;
                 emit(ScanEvent::Host(Host {
@@ -627,6 +756,7 @@ pub async fn run_scan(ips: Vec<Ipv4Addr>, threads: usize, cancel: Arc<AtomicBool
                     ms: None,
                     alive: false,
                     kind,
+                    old_name,
                 }));
             });
         }
@@ -665,6 +795,8 @@ pub struct Info {
     pub ram_free: Option<u64>,
     pub user: Option<String>,
     pub last_user: Option<String>,
+    /// Nombre real del equipo según Windows (puede diferir del DNS si el registro es antiguo).
+    pub hostname: Option<String>,
     pub domain: Option<String>,
     pub manufacturer: Option<String>,
     pub model: Option<String>,
@@ -674,13 +806,6 @@ pub struct Info {
     pub threads: Option<f64>,
     pub cpu_load: Option<f64>,
     pub disks: Vec<Disk>,
-    /// Antivirus registrados en el Centro de seguridad (separados por coma).
-    pub av: Option<String>,
-    /// Estado de BitLocker por unidad: «C:1;D:0» (1 = protegida, 0 = no, 2 = desconocido).
-    pub bitlocker: Option<String>,
-    /// Número de parches (hotfix) instalados y fecha del último (AAAA-MM-DD).
-    pub patches: Option<f64>,
-    pub last_patch: Option<String>,
 }
 
 #[derive(serde::Deserialize)]
@@ -707,6 +832,8 @@ struct RawInfo {
     user: Option<String>,
     #[serde(default)]
     last_user: Option<String>,
+    #[serde(default)]
+    hostname: Option<String>,
     domain: Option<String>,
     manufacturer: Option<String>,
     model: Option<String>,
@@ -717,14 +844,6 @@ struct RawInfo {
     cpu_load: Option<f64>,
     #[serde(default)]
     disks: Vec<RawDisk>,
-    #[serde(default)]
-    av: Option<String>,
-    #[serde(default)]
-    bitlocker: Option<String>,
-    #[serde(default)]
-    patches: Option<f64>,
-    #[serde(default)]
-    last_patch: Option<String>,
 }
 
 fn clean(s: Option<String>) -> Option<String> {
@@ -745,6 +864,7 @@ pub fn parse_info_json(json: &str) -> Result<Info, String> {
         ram_free: r.ram_free,
         user: clean(r.user),
         last_user: clean(r.last_user),
+        hostname: clean(r.hostname),
         domain: clean(r.domain),
         manufacturer: clean(r.manufacturer),
         model: clean(r.model),
@@ -763,10 +883,6 @@ pub fn parse_info_json(json: &str) -> Result<Info, String> {
                 free: d.free_space.unwrap_or(0),
             })
             .collect(),
-        av: clean(r.av),
-        bitlocker: clean(r.bitlocker),
-        patches: r.patches,
-        last_patch: clean(r.last_patch),
     })
 }
 
@@ -820,6 +936,89 @@ pub fn parse_software_json(json: &str) -> Result<Vec<Software>, String> {
     Ok(out)
 }
 
+// ───────────────────────── Seguridad y parches (consulta aparte) ─────────────────────────
+
+/// Datos que se piden aparte de la ficha principal porque pueden ser lentos o no existir:
+/// antivirus, BitLocker y parches instalados.
+#[derive(Serialize, Clone, Debug, PartialEq)]
+pub struct Extra {
+    /// Antivirus registrados en el Centro de seguridad (separados por coma).
+    pub av: Option<String>,
+    /// Estado de BitLocker por unidad: «C:1;D:0» (1 = protegida, 0 = no, 2 = desconocido).
+    pub bitlocker: Option<String>,
+    /// Número de actualizaciones (hotfix) instaladas y fecha de la última (AAAA-MM-DD).
+    pub patches: u32,
+    pub last_patch: Option<String>,
+}
+
+pub fn parse_extra_json(json: &str) -> Result<Extra, String> {
+    let v: serde_json::Value = serde_json::from_str(json.trim().trim_start_matches('\u{feff}'))
+        .map_err(|e| format!("Respuesta no válida: {e}"))?;
+    let text = |k: &str| clean(v.get(k).and_then(|x| x.as_str()).map(String::from));
+    Ok(Extra {
+        av: text("av"),
+        bitlocker: text("bitlocker"),
+        patches: v.get("patches").and_then(|x| x.as_u64()).unwrap_or(0) as u32,
+        last_patch: text("last_patch"),
+    })
+}
+
+#[cfg(windows)]
+const EXTRA_PS: &str = r#"
+$ErrorActionPreference='Stop'
+[Console]::OutputEncoding=[Text.Encoding]::UTF8
+try {
+  $s = $null
+  if ($env:SCAN_LOCAL -ne '1') {
+    $p = @{ ComputerName=$env:SCAN_HOST; SessionOption=(New-CimSessionOption -Protocol Dcom); OperationTimeoutSec=60 }
+    if ($env:SCAN_USER) {
+      $p.Credential = New-Object System.Management.Automation.PSCredential($env:SCAN_USER,(ConvertTo-SecureString $env:SCAN_PASS -AsPlainText -Force))
+    }
+    $s = New-CimSession @p
+  }
+  $av = $null; $bl = $null; $cnt = 0; $last = $null
+  try {
+    try {
+      $a = @{ Namespace='root/SecurityCenter2'; ClassName='AntiVirusProduct'; ErrorAction='Stop' }
+      if ($s) { $a.CimSession = $s }
+      $av = (@(Get-CimInstance @a | ForEach-Object { $_.displayName } | Where-Object { $_ } | Select-Object -Unique)) -join ', '
+    } catch { }
+    try {
+      $a = @{ Namespace='root/CIMV2/Security/MicrosoftVolumeEncryption'; ClassName='Win32_EncryptableVolume'; ErrorAction='Stop' }
+      if ($s) { $a.CimSession = $s }
+      $bl = (@(Get-CimInstance @a | ForEach-Object { '' + $_.DriveLetter + [int]$_.ProtectionStatus }) -join ';')
+    } catch { }
+    try {
+      $a = @{ ClassName='Win32_QuickFixEngineering'; ErrorAction='Stop' }
+      if ($s) { $a.CimSession = $s }
+      $hf = @(Get-CimInstance @a)
+      $cnt = $hf.Count
+      $d = @($hf | ForEach-Object { try { [datetime]$_.InstalledOn } catch { } } | Where-Object { $_ } | Sort-Object -Descending | Select-Object -First 1)
+      if ($d.Count -gt 0) { $last = $d[0].ToString('yyyy-MM-dd') }
+    } catch { }
+  } finally { if ($s) { Remove-CimSession $s } }
+  ConvertTo-Json -Compress @{ av = $av; bitlocker = $bl; patches = $cnt; last_patch = $last }
+} catch { [Console]::Error.WriteLine($_.Exception.Message); exit 1 }
+"#;
+
+/// Antivirus, BitLocker y parches de un equipo (consulta aparte de la ficha principal). Solo Windows.
+pub async fn get_extra(
+    ip: Ipv4Addr,
+    name: &str,
+    cred: Option<(String, String)>,
+) -> Result<Extra, String> {
+    #[cfg(not(windows))]
+    {
+        let _ = (ip, name, cred);
+        Err("La consulta de equipos solo está disponible en Windows".into())
+    }
+    #[cfg(windows)]
+    {
+        let out = run_ps(EXTRA_PS, ip, name, cred, 150).await?;
+        parse_extra_json(&out)
+    }
+}
+
 // ───────────────────────── Puertos abiertos ─────────────────────────
 
 /// Puertos habituales que se comprueban (FTP, SSH, Telnet, HTTP, RPC, NetBIOS, HTTPS, SMB,
@@ -867,19 +1066,6 @@ try {
     $cpu  = @(Q 'Win32_Processor' $null $false)
     $bios = Q 'Win32_BIOS' $null $false
     $dk   = @(Q 'Win32_LogicalDisk' 'DriveType=3' $false)
-    $hf   = @(Q 'Win32_QuickFixEngineering' $null $false)
-    $av = $null
-    try {
-      $a = @{ Namespace='root/SecurityCenter2'; ClassName='AntiVirusProduct'; ErrorAction='Stop' }
-      if ($s) { $a.CimSession = $s }
-      $av = (@(Get-CimInstance @a | ForEach-Object { $_.displayName } | Where-Object { $_ } | Select-Object -Unique)) -join ', '
-    } catch { }
-    $bl = $null
-    try {
-      $a = @{ Namespace='root/CIMV2/Security/MicrosoftVolumeEncryption'; ClassName='Win32_EncryptableVolume'; ErrorAction='Stop' }
-      if ($s) { $a.CimSession = $s }
-      $bl = (@(Get-CimInstance @a | ForEach-Object { '' + $_.DriveLetter + '' + [int]$_.ProtectionStatus }) -join ';')
-    } catch { }
     $lu = $null
     try {
       $ra = @{ Namespace='root/default'; ClassName='StdRegProv'; MethodName='GetStringValue'; ErrorAction='Stop'
@@ -891,24 +1077,18 @@ try {
   $up = $null
   if ($os.LastBootUpTime -and $os.LocalDateTime) { $up = [math]::Round(($os.LocalDateTime - $os.LastBootUpTime).TotalSeconds) }
   $load = ($cpu | Measure-Object LoadPercentage -Average).Average
-  $lp = $null
-  try {
-    $d = @($hf | ForEach-Object { try { [datetime]$_.InstalledOn } catch { } } | Where-Object { $_ } | Sort-Object -Descending | Select-Object -First 1)
-    if ($d.Count -gt 0) { $lp = $d[0].ToString('yyyy-MM-dd') }
-  } catch { }
   $o = [ordered]@{
     os = $os.Caption; version = $os.Version; build = $os.BuildNumber; arch = $os.OSArchitecture
     uptime_s = $up
     ram_total = [uint64]$os.TotalVisibleMemorySize * 1024
     ram_free  = [uint64]$os.FreePhysicalMemory * 1024
-    user = $cs.UserName; last_user = $(if ($cs.UserName) { $cs.UserName } else { $lu }); domain = $cs.Domain; manufacturer = $cs.Manufacturer; model = $cs.Model
+    user = $cs.UserName; last_user = $(if ($cs.UserName) { $cs.UserName } else { $lu }); domain = $cs.Domain; hostname = $cs.Name; manufacturer = $cs.Manufacturer; model = $cs.Model
     serial = $bios.SerialNumber
     cpu = ($cpu | Select-Object -First 1).Name
     cores = ($cpu | Measure-Object NumberOfCores -Sum).Sum
     threads = ($cpu | Measure-Object NumberOfLogicalProcessors -Sum).Sum
     cpu_load = $load
     disks = @($dk | Select-Object DeviceID,VolumeName,Size,FreeSpace)
-    av = $av; bitlocker = $bl; patches = $hf.Count; last_patch = $lp
   }
   ConvertTo-Json -InputObject $o -Compress -Depth 4
 } catch { [Console]::Error.WriteLine($_.Exception.Message); exit 1 }
@@ -977,7 +1157,7 @@ pub async fn get_info(
     }
     #[cfg(windows)]
     {
-        let out = run_ps(INFO_PS, ip, name, cred, 60).await?;
+        let out = run_ps(INFO_PS, ip, name, cred, 40).await?;
         parse_info_json(&out)
     }
 }
@@ -1111,16 +1291,80 @@ mod tests {
         assert!(parse_software_json("[]").unwrap().is_empty());
     }
 
+    fn nbstat_resp(names: &[(&str, u8, u16)]) -> Vec<u8> {
+        let mut r = vec![0x4e, 0x42, 0x84, 0, 0, 0, 0, 1, 0, 0, 0, 0];
+        r.push(0x20);
+        r.extend_from_slice(b"CKAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA");
+        r.push(0);
+        r.extend_from_slice(&[0, 0x21, 0, 1, 0, 0, 0, 0]);
+        let rdlen = 1 + names.len() * 18 + 6;
+        r.extend_from_slice(&(rdlen as u16).to_be_bytes());
+        r.push(names.len() as u8);
+        for (n, suf, fl) in names {
+            let mut b = n.as_bytes().to_vec();
+            b.resize(15, b' ');
+            r.extend_from_slice(&b);
+            r.push(*suf);
+            r.extend_from_slice(&fl.to_be_bytes());
+        }
+        r.extend_from_slice(&[0; 6]);
+        r
+    }
+
     #[test]
-    fn info_extra() {
-        let j = r#"{"os":"Windows 11","disks":[],"av":"Windows Defender","bitlocker":"C:1;D:0","patches":42,"last_patch":"2026-10-14"}"#;
-        let i = parse_info_json(j).unwrap();
-        assert_eq!(i.av.as_deref(), Some("Windows Defender"));
-        assert_eq!(i.bitlocker.as_deref(), Some("C:1;D:0"));
-        assert_eq!(i.patches, Some(42.0));
-        assert_eq!(i.last_patch.as_deref(), Some("2026-10-14"));
-        // sin los campos nuevos sigue funcionando
-        assert!(parse_info_json(r#"{"os":null,"disks":[]}"#).unwrap().av.is_none());
+    fn nbstat_respuesta() {
+        let r = nbstat_resp(&[("MU45CD3137095", 0x20, 0x0400), ("MU45CD3137095", 0x00, 0x0400), ("CENTRALES", 0x00, 0x8400)]);
+        assert_eq!(parse_nbstat(&r).as_deref(), Some("MU45CD3137095"));
+        // solo nombre de grupo → ninguno
+        let g = nbstat_resp(&[("CENTRALES", 0x00, 0x8400)]);
+        assert_eq!(parse_nbstat(&g), None);
+        assert_eq!(parse_nbstat(&[1, 2, 3]), None);
+        assert_eq!(parse_nbstat(&r[..30]), None);
+    }
+
+    #[test]
+    fn elegir_nombre() {
+        let d = |n: &str, ok| Some((n.to_string(), ok));
+        let nb = |n: &str| Some(n.to_string());
+        // coinciden: se conserva el nombre completo del DNS
+        assert_eq!(choose_name(d("MU45CD3136ZQ3.iipp.int", true), nb("MU45CD3136ZQ3")), ("MU45CD3136ZQ3.iipp.int".into(), None));
+        // el DNS está obsoleto aunque se confirme: manda el equipo
+        assert_eq!(
+            choose_name(d("MU4WXLIBVIG.iipp.int", true), nb("MU45CD3137095")),
+            ("MU45CD3137095".into(), Some("MU4WXLIBVIG.iipp.int".into()))
+        );
+        // sin NetBIOS: DNS solo si está confirmado
+        assert_eq!(choose_name(d("X.iipp.int", true), None).0, "X.iipp.int");
+        assert_eq!(choose_name(d("X.iipp.int", false), None), (String::new(), None));
+        assert_eq!(choose_name(None, nb("PC1")), ("PC1".into(), None));
+        // nombres largos: NetBIOS se corta a 15
+        assert!(same_host("EQUIPOMUYLARGO123.iipp.int", "EQUIPOMUYLARGO1"));
+    }
+
+    #[test]
+    fn nombre_dns_verificado() {
+        let ip: Ipv4Addr = "10.0.0.5".parse().unwrap();
+        assert!(name_matches(ip, &["10.0.0.5".parse().unwrap()]));
+        assert!(name_matches(ip, &["10.0.0.9".parse().unwrap(), "10.0.0.5".parse().unwrap()]));
+        assert!(!name_matches(ip, &["10.0.0.9".parse().unwrap()]));
+        assert!(!name_matches(ip, &[]));
+    }
+
+    #[test]
+    fn hostname_real() {
+        let i = parse_info_json(r#"{"os":"Windows 11","disks":[],"hostname":"MU45CD3136ZQ3"}"#).unwrap();
+        assert_eq!(i.hostname.as_deref(), Some("MU45CD3136ZQ3"));
+    }
+
+    #[test]
+    fn extra_json() {
+        let e = parse_extra_json(r#"{"av":"Windows Defender","bitlocker":"C:1;D:0","patches":42,"last_patch":"2026-10-14"}"#).unwrap();
+        assert_eq!(e.av.as_deref(), Some("Windows Defender"));
+        assert_eq!(e.bitlocker.as_deref(), Some("C:1;D:0"));
+        assert_eq!(e.patches, 42);
+        assert_eq!(e.last_patch.as_deref(), Some("2026-10-14"));
+        let v = parse_extra_json(r#"{"av":"","bitlocker":null,"patches":0,"last_patch":null}"#).unwrap();
+        assert_eq!((v.av, v.bitlocker, v.last_patch), (None, None, None));
     }
 
     #[tokio::test]

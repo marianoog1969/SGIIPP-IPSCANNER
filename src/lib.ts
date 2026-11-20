@@ -7,6 +7,8 @@ export interface Host {
   ms: number | null;
   alive: boolean;
   kind?: string;
+  /** Nombre que daba el DNS cuando difiere del nombre real del equipo (registro antiguo). */
+  oldName?: string;
 }
 export interface Network {
   name: string;
@@ -29,6 +31,7 @@ export interface Info {
   ram_free: number | null;
   user: string | null;
   last_user?: string | null;
+  hostname?: string | null;
   domain: string | null;
   manufacturer: string | null;
   model: string | null;
@@ -38,10 +41,13 @@ export interface Info {
   threads: number | null;
   cpu_load: number | null;
   disks: Disk[];
-  av?: string | null;
-  bitlocker?: string | null;
-  patches?: number | null;
-  last_patch?: string | null;
+}
+/** Datos que se piden aparte de la ficha: antivirus, BitLocker y parches. */
+export interface Extra {
+  av: string | null;
+  bitlocker: string | null;
+  patches: number;
+  last_patch: string | null;
 }
 export interface Software {
   name: string;

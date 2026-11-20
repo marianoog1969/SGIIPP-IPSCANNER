@@ -14,6 +14,15 @@ npm run version:minor    # novedades
 npm run version:major    # cambio mayor
 ```
 
+## 3.1.0 · 2026-11-20
+- Mejora: el nombre se toma ahora del propio equipo por NetBIOS (UDP 137, rápido y sin lanzar procesos) y manda sobre el DNS cuando difieren; el nombre antiguo del DNS queda en el aviso ↺. Soluciona IPs reutilizadas cuyo DNS (PTR y A) sigue con el nombre viejo, como MU4WXLIBVIG → MU45CD3137095.
+- Corrección: nombres de equipos que ya no existen (registros DNS inversos antiguos, tipo «mu4wX…») ya no se muestran. El nombre del DNS solo se acepta si el DNS directo lo confirma para esa misma IP; si no, se usa el nombre NetBIOS del propio equipo, o se deja vacío.
+- Novedad: si el nombre del DNS no coincide con el que da Windows al leer la ficha, se muestra el **nombre real** con la marca ↺ (el aviso indica el nombre antiguo).
+
+## 3.0.1 · 2026-11-20
+- Corrección: RAM, almacenamiento y demás datos de la ficha podían quedar vacíos desde la 3.0.0. La lectura principal vuelve a ser rápida y sin cambios.
+- Cambio: antivirus, BitLocker y parches se consultan aparte (botón «Consultar antivirus, BitLocker y parches» en la ficha, o «Seguridad» en la barra de selección para varios equipos), porque en algunos equipos son lentos o no están disponibles.
+
 ## 3.0.0 · 2026-11-19
 - Novedad: **ficha ampliada** con antivirus, estado de BitLocker por unidad, último parche instalado y botón **Software instalado** (lista filtrable y copiable).
 - Novedad: **puertos abiertos** (13 puertos habituales): botón en la ficha y en la barra de selección, columna opcional, y datos en el informe PDF y el Excel.

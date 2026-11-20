@@ -1,5 +1,14 @@
 # SGIIPP-IPSCANNER · Version history
 
+## 3.1.0 · 2026-11-20
+- Improvement: the name is now taken from the device itself via NetBIOS (UDP 137, fast, no processes spawned) and wins over DNS when they differ; the old DNS name is shown in the ↺ tooltip. Fixes reused IPs whose DNS (PTR and A) still has the old name, like MU4WXLIBVIG → MU45CD3137095.
+- Fix: names of devices that no longer exist (stale reverse-DNS records, like “mu4wX…”) are no longer shown. The DNS name is only accepted if forward DNS confirms it for that same IP; otherwise the device's own NetBIOS name is used, or the name is left empty.
+- New: if the DNS name differs from the one Windows reports when the sheet is read, the **real name** is shown with a ↺ mark (the tooltip gives the old name).
+
+## 3.0.1 · 2026-11-20
+- Fix: RAM, storage and the other sheet data could stay empty since 3.0.0. The main read is fast again and unchanged.
+- Change: antivirus, BitLocker and patches are queried separately (“Query antivirus, BitLocker and patches” button in the detail panel, or “Security” in the selection bar for several devices), because on some devices they are slow or unavailable.
+
 ## 3.0.0 · 2026-11-19
 - New: **extended device sheet** with antivirus, BitLocker status per drive, latest installed patch and an **Installed software** button (filterable, copyable list).
 - New: **open ports** (13 common ports): button in the detail panel and in the selection bar, optional column, and data in the PDF report and Excel.

@@ -1,12 +1,13 @@
 import { t } from "./i18n";
 import { getNote } from "./notes";
 import { vendorOf } from "./oui";
-import { Host, Info, bitlockerText, portsText, osVersion, kindLabel, deviceKind, userOf, diskText, fmtRam, fmtUptime, shortOs } from "./lib";
+import { Host, Info, Extra, bitlockerText, portsText, osVersion, kindLabel, deviceKind, userOf, diskText, fmtRam, fmtUptime, shortOs } from "./lib";
 
 export interface Row {
   h: Host;
   info?: Info;
   ports?: number[];
+  extra?: Extra;
 }
 
 export interface Col {
@@ -59,17 +60,15 @@ export const COLS: Col[] = [
   { key: "serie", short: "Nº serie", label: "Nº de serie", group: "ficha", get: (r) => r.info?.serial || dash },
   { key: "cpu", short: "CPU", label: "Procesador", group: "ficha", get: (r) => r.info?.cpu || dash },
   { key: "dominio", label: "Dominio", group: "ficha", get: (r) => r.info?.domain || dash },
-  { key: "av", short: "AV", label: "Antivirus", group: "ficha", get: (r) => r.info?.av || dash },
-  { key: "bitlocker", short: "BitLocker", label: "BitLocker", group: "ficha", get: (r) => bitlockerText(r.info?.bitlocker) || dash },
+  { key: "av", short: "AV", label: "Antivirus", group: "ficha", get: (r) => r.extra?.av || dash },
+  { key: "bitlocker", short: "BitLocker", label: "BitLocker", group: "ficha", get: (r) => bitlockerText(r.extra?.bitlocker) || dash },
   {
     key: "parche",
     short: "Parche",
     label: "Último parche",
     group: "ficha",
     get: (r) =>
-      r.info?.last_patch
-        ? `${r.info.last_patch}${r.info.patches ? ` (${r.info.patches})` : ""}`
-        : dash,
+      r.extra?.last_patch ? `${r.extra.last_patch}${r.extra.patches ? ` (${r.extra.patches})` : ""}` : dash,
   },
   { key: "puertos", short: "Puertos", label: "Puertos abiertos", group: "ficha", get: (r) => portsText(r.ports) || dash },
   {

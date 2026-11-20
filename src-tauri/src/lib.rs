@@ -100,6 +100,25 @@ async fn get_software(
 }
 
 #[tauri::command]
+async fn get_extra(
+    ip: String,
+    name: String,
+    user: Option<String>,
+    password: Option<String>,
+) -> Result<scanner::Extra, String> {
+    let ip: std::net::Ipv4Addr = ip.parse().map_err(|_| "IP no válida".to_string())?;
+    let cred = match (user, password) {
+        (Some(u), Some(p)) if !u.trim().is_empty() => Some((u, p)),
+        _ => None,
+    };
+    let r = scanner::get_extra(ip, &name, cred).await;
+    if let Err(e) = &r {
+        logger::log("WARN", &format!("seguridad/parches de {ip} fallido: {e}"));
+    }
+    r
+}
+
+#[tauri::command]
 async fn scan_ports(ip: String) -> Result<Vec<u16>, String> {
     let ip: std::net::Ipv4Addr = ip.parse().map_err(|_| "IP no válida".to_string())?;
     Ok(scanner::scan_ports(ip).await)
@@ -493,6 +512,7 @@ pub fn run() {
             stop_scan,
             get_info,
             get_software,
+            get_extra,
             scan_ports,
             save_file,
             remote_tools,

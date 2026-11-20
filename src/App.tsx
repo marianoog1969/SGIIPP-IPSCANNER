@@ -6,6 +6,7 @@ import {
   Host,
   Network,
   Info,
+  Extra,
   InfoState,
   fmtUptime,
   diskPct,
@@ -134,6 +135,8 @@ export default function App() {
   const [ports, setPorts] = useState<Map<string, number[]>>(new Map());
   const [portsBusy, setPortsBusy] = useState<Set<string>>(new Set());
   const [swHost, setSwHost] = useState<Host | null>(null);
+  const [extras, setExtras] = useState<Map<string, Extra>>(new Map());
+  const [extrasBusy, setExtrasBusy] = useState<Set<string>>(new Set());
   const [autoCheck, setAutoCheck] = useState(prefs.autoCheck ?? true);
   const [onlyAlerts, setOnlyAlerts] = useState(prefs.onlyAlerts ?? false);
   const [kindFilter, setKindFilter] = useState<string>(prefs.kindFilter || "all");
@@ -211,6 +214,15 @@ export default function App() {
           password: withCred ? cred.pass : null,
         });
         set({ loading: false, info });
+        // Si el DNS tenía un nombre antiguo, se usa el nombre real que da Windows
+        const real = info.hostname?.trim();
+        const dnsLabel = h.name.split(".")[0].trim();
+        if (real && dnsLabel && dnsLabel.slice(0, 15).toLowerCase() !== real.slice(0, 15).toLowerCase()) {
+          setHosts((prev) => {
+            const cur = prev.get(h.ip);
+            return cur && !cur.oldName ? new Map(prev).set(h.ip, { ...cur, name: real, oldName: cur.name }) : prev;
+          });
+        }
       } catch (e) {
         set({ loading: false, error: String(e) });
       }
@@ -839,6 +851,40 @@ export default function App() {
       .catch((e) => setError(String(e)));
   };
 
+  /** Celda de un dato de «seguridad y parches»: vacío hasta que se consulta. */
+  const extraCell = (h: Host, v: string | null) =>
+    extrasBusy.has(h.ip) ? <span className="muted">…</span> : v ? v : <span className="muted">—</span>;
+
+  const loadExtras = async (list: Host[]) => {
+    const todo = list.filter((h) => !extrasBusy.has(h.ip));
+    if (!todo.length) return;
+    setExtrasBusy((c) => new Set([...c, ...todo.map((h) => h.ip)]));
+    let i = 0;
+    const worker = async () => {
+      while (i < todo.length) {
+        const h = todo[i++];
+        try {
+          const e = await invoke<Extra>("get_extra", {
+            ip: h.ip,
+            name: h.name,
+            user: cred.user.trim() ? cred.user : null,
+            password: cred.user.trim() ? cred.pass : null,
+          });
+          setExtras((c) => new Map(c).set(h.ip, e));
+        } catch (e) {
+          setError(`${h.name || h.ip}: ${e}`);
+        }
+        setExtrasBusy((c) => {
+          const n = new Set(c);
+          n.delete(h.ip);
+          return n;
+        });
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(4, todo.length) }, worker));
+    if (todo.length > 1) notify(t("Seguridad y parches consultados en {n} equipos", { n: todo.length }));
+  };
+
   const checkPorts = async (list: Host[]) => {
     const todo = list.filter((h) => !portsBusy.has(h.ip));
     if (!todo.length) return;
@@ -912,6 +958,9 @@ export default function App() {
         <td key="name" onDoubleClick={() => h.name && copy(h.name, t("Nombre"))}>
           <DeviceIcon kind={deviceKind(h, infos.get(h.ip)?.info)} />
           {h.name || <span className="muted">—</span>}
+          {h.oldName && (
+            <span className="old-name" title={t("El DNS indicaba «{old}» (nombre antiguo); este es el nombre real del equipo", { old: h.oldName })}>↺</span>
+          )}
           {isStar(h) && <span className="star-mark" title={t("Equipo importante")}>★</span>}
           {unknown.has(h.ip) && <span className="unk-mark" title={t("MAC no vista antes en esta red")}>❓</span>}
           {conflicts.has(h.ip) && <span className="conf-mark" title={conflicts.get(h.ip)!.join("\n")}>⚡</span>}
@@ -948,14 +997,14 @@ export default function App() {
     { key: "ram", label: "RAM", sort: "ram", num: true, td: (h) => <td key="ram" className="num">{infoCell(h, ramOf(h) ? fmtRam(ramOf(h)) : null)}</td> },
     { key: "disk", label: t("Almacenamiento"), sort: "disk", td: (h) => <td key="disk">{diskCell(h)}</td> },
     { key: "ms", label: t("Latencia"), sort: "ms", num: true, td: (h) => <td key="ms" className="num">{h.ms != null ? `${h.ms} ms` : <span className="muted">—</span>}</td> },
-    { key: "av", label: "Antivirus", td: (h) => { const v = infos.get(h.ip)?.info?.av; return <td key="av" title={v ?? ""}>{infoCell(h, v || null)}</td>; } },
-    { key: "bl", label: "BitLocker", td: (h) => { const v = bitlockerText(infos.get(h.ip)?.info?.bitlocker); return <td key="bl" title={v}>{infoCell(h, v || null)}</td>; } },
+    { key: "av", label: "Antivirus", td: (h) => { const v = extras.get(h.ip)?.av; return <td key="av" title={v ?? ""}>{extraCell(h, v || null)}</td>; } },
+    { key: "bl", label: "BitLocker", td: (h) => { const v = bitlockerText(extras.get(h.ip)?.bitlocker); return <td key="bl" title={v}>{extraCell(h, v || null)}</td>; } },
     {
       key: "patch",
       label: t("Último parche"),
       td: (h) => {
-        const i = infos.get(h.ip)?.info;
-        return <td key="patch" title={i?.patches ? t("{n} parches instalados", { n: i.patches }) : ""}>{infoCell(h, i?.last_patch || null)}</td>;
+        const e = extras.get(h.ip);
+        return <td key="patch" title={e?.patches ? t("{n} parches instalados", { n: e.patches }) : ""}>{extraCell(h, e?.last_patch || null)}</td>;
       },
     },
     {
@@ -1013,7 +1062,7 @@ export default function App() {
     return i && diskAlerts(i).length > 0;
   }).length;
 
-  const toRow = (h: Host): Row => ({ h, info: infos.get(h.ip)?.info, ports: ports.get(h.ip) });
+  const toRow = (h: Host): Row => ({ h, info: infos.get(h.ip)?.info, ports: ports.get(h.ip), extra: extras.get(h.ip) });
   const visibleRows: Row[] = rows.map(toRow);
   const allRows: Row[] = [...hosts.values()].sort((a, b) => ipNum(a.ip) - ipNum(b.ip)).map(toRow);
 
@@ -1329,6 +1378,9 @@ export default function App() {
           >
             {t("Copiar IPs")}
           </button>
+          <button className="btn" onClick={() => loadExtras([...marked].map((ip) => hosts.get(ip)).filter((h): h is Host => !!h))} title={t("Consultar antivirus, BitLocker y parches de los equipos seleccionados (puede tardar)")}>
+            {t("Seguridad")}
+          </button>
           <button className="btn" onClick={() => checkPorts([...marked].map((ip) => hosts.get(ip)).filter((h): h is Host => !!h))} title={t("Comprobar los puertos habituales de los equipos seleccionados")}>
             {t("Puertos")}
           </button>
@@ -1556,12 +1608,6 @@ export default function App() {
                 {row(t("Último usuario"), userOf(info))}
                 {row(t("Dominio"), info.domain)}
                 {row(t("Encendido"), info.uptime_s != null ? t("hace {t}", { t: fmtUptime(info.uptime_s) }) : null)}
-                {row("Antivirus", info.av)}
-                {row("BitLocker", bitlockerText(info.bitlocker))}
-                {row(
-                  t("Último parche"),
-                  info.last_patch && `${info.last_patch}${info.patches ? ` · ${t("{n} parches instalados", { n: info.patches })}` : ""}`
-                )}
               </dl>
 
               {info.ram_total
@@ -1587,6 +1633,27 @@ export default function App() {
               })}
             </>
           )}
+
+          <div className="d-sec">
+            <h3>{t("Seguridad y parches")}</h3>
+            {extras.has(sel.ip) && (
+              <dl>
+                {row("Antivirus", extras.get(sel.ip)!.av ?? t("No detectado"))}
+                {row("BitLocker", bitlockerText(extras.get(sel.ip)!.bitlocker) || t("Sin datos"))}
+                {row(
+                  t("Último parche"),
+                  extras.get(sel.ip)!.last_patch
+                    ? `${extras.get(sel.ip)!.last_patch} · ${t("{n} parches instalados", { n: extras.get(sel.ip)!.patches })}`
+                    : t("Sin datos")
+                )}
+              </dl>
+            )}
+            <div className="d-actions">
+              <button className="btn" disabled={extrasBusy.has(sel.ip)} onClick={() => loadExtras([sel])} title={t("Consulta aparte: puede tardar hasta un par de minutos")}>
+                {extrasBusy.has(sel.ip) ? t("Consultando…") : extras.has(sel.ip) ? t("Volver a consultar") : t("Consultar antivirus, BitLocker y parches")}
+              </button>
+            </div>
+          </div>
 
           <div className="d-sec">
             <h3>{t("Puertos abiertos")}</h3>
